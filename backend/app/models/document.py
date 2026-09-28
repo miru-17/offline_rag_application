@@ -17,6 +17,13 @@ class Document(Base):
         default=uuid.uuid4,
     )
 
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -39,6 +46,15 @@ class Document(Base):
         nullable=False,
     )
 
+    # PRIVATE  -> Only the uploader can access
+    # TENANT   -> Authorized users/viewers in the same tenant can access
+    visibility: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="PRIVATE",
+        index=True,
+    )
+
     processed: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
@@ -53,5 +69,10 @@ class Document(Base):
 
     user = relationship(
         "User",
+        back_populates="documents",
+    )
+
+    tenant = relationship(
+        "Tenant",
         back_populates="documents",
     )

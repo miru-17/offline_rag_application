@@ -2,8 +2,10 @@ from datetime import datetime, timedelta, timezone
 import os
 
 import bcrypt
+from dotenv import load_dotenv
 from jose import jwt
 
+load_dotenv()
 
 SECRET_KEY = os.getenv(
     "JWT_SECRET_KEY",

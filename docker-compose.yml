@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: ragentis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: offline_rag
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d offline_rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ragentis-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  backend:
+    image: ragentis-backend:latest
+    container_name: ragentis-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    environment:
+      DATABASE_URL: "postgresql+psycopg2://postgres:${POSTGRES_PASSWORD}@postgres:5432/offline_rag"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY}"
+      OLLAMA_URL: "http://ollama:11434/api/generate"
+      OLLAMA_TAGS_URL: "http://ollama:11434/api/tags"
+      OLLAMA_MODEL: "llama3.2:3b"
+    volumes:
+      - rag_uploads:/app/uploads
+      - rag_chroma:/app/chroma_db
+    ports:
+      - "8000:8000"
+
+volumes:
+  postgres_data:
+  ollama_data:
+  rag_uploads:
+  rag_chroma:

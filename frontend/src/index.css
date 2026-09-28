@@ -1,0 +1,119 @@
+:root {
+  font-family:
+    "Inter",
+    "Roboto",
+    "Helvetica",
+    "Arial",
+    sans-serif;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: #f5f7fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+/* --------------------------------
+   RAGENTIS Global Animations
+--------------------------------- */
+
+.ragentis-animated,
+.ragentis-animated * {
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+/* --------------------------------
+   Disable animations
+--------------------------------- */
+
+.ragentis-no-animations *,
+.ragentis-no-animations *::before,
+.ragentis-no-animations *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* --------------------------------
+   Smooth scrolling
+--------------------------------- */
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* --------------------------------
+   Scrollbar
+--------------------------------- */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.35);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.55);
+}
+
+/* --------------------------------
+   Selection
+--------------------------------- */
+
+::selection {
+  background: rgba(108, 99, 255, 0.18);
+}
+
+/* --------------------------------
+   Accessibility
+--------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+}
