@@ -42,3 +42,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+# Licence signing key (vendor secret) and issued licence files
+*.license
+license_signing_key*.pem
+**/chroma.sqlite3
+backend/server.log

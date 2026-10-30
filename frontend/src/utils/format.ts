@@ -79,6 +79,7 @@ export const getApiErrorMessage = (error: unknown, fallback: string): string => 
     }
     const detail = (error.response.data as { detail?: unknown } | undefined)?.detail;
     if (typeof detail === "string" && detail.trim()) return detail;
+    if (detail && typeof detail === "object" && "message" in detail) return String((detail as { message: unknown }).message);
     if (Array.isArray(detail) && detail[0]?.msg) return String(detail[0].msg);
   }
   if (error instanceof Error && error.message) return error.message;

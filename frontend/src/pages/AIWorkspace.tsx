@@ -9,7 +9,7 @@ import KeyboardArrowDownRoundedIcon from "@mui/icons-material/KeyboardArrowDownR
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthContext";
-import { queryDocuments, type QuerySource } from "../api/query.api";
+import { streamQuery, type QuerySource } from "../api/query.api";
 import {
   deleteConversation,
   getConversation,
@@ -87,6 +87,7 @@ export default function AIWorkspace() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const handledNavKey = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const modelName = system.status?.model;
   const hasThread = messages.length > 0 || isAsking;
@@ -117,9 +118,8 @@ export default function AIWorkspace() {
 
     getLicenseStatus()
       .then((s) => {
-        const lic = s.license;
-        const valid = Boolean(s.licensed && lic?.is_active && getTimestamp(lic.expires_at) > Date.now());
-        setLicenseBlocked(!valid);
+        // The server decides validity from the signed licence (incl. grace period).
+        setLicenseBlocked(!s.licensed);
       })
       .catch(() => setLicenseBlocked(false)); // let the API decide
   }, [loadConversations]);
@@ -133,7 +133,7 @@ export default function AIWorkspace() {
   useLayoutEffect(() => {
     if (atBottom) scrollToBottom(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length, isAsking, failed]);
+  }, [messages.length, isAsking, failed, messages[messages.length - 1]?.content.length]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -160,34 +160,72 @@ export default function AIWorkspace() {
       setAtBottom(true);
       setIsAsking(true);
 
-      try {
-        const response = await queryDocuments(text, conversationId ?? undefined);
-        setConversationId(response.conversation_id);
+      const assistantId = newId();
+      let started = false;
+      const update = (patch: (m: ChatMessage) => ChatMessage) =>
+        setMessages((current) => current.map((m) => (m.id === assistantId ? patch(m) : m)));
+      const ensureMessage = () => {
+        if (started) return;
+        started = true;
         setMessages((current) => [
           ...current,
-          {
-            id: newId(),
-            role: "assistant",
-            content: response.answer,
-            sources: response.sources ?? [],
-            createdAt: new Date().toISOString(),
-            fresh: true,
-          },
+          { id: assistantId, role: "assistant", content: "", sources: [], createdAt: new Date().toISOString(),
+            fresh: true, streaming: true },
         ]);
+      };
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+      let streamError: string | null = null;
+
+      try {
+        await streamQuery(
+          text,
+          conversationId ?? undefined,
+          {
+            onMeta: (data) => setConversationId(data.conversation_id),
+            onToken: (piece) => {
+              ensureMessage();
+              update((m) => ({ ...m, content: m.content + piece }));
+            },
+            onSources: (sources) => {
+              ensureMessage();
+              update((m) => ({ ...m, sources }));
+            },
+            onDone: (data) => update((m) => ({ ...m, serverId: data.message_id, status: data.status, streaming: false })),
+            onError: (detail) => {
+              streamError = detail;
+            },
+          },
+          controller.signal,
+        );
+        if (streamError) {
+          if (started) update((m) => ({ ...m, streaming: false, status: "error" }));
+          else setFailed({ question: text, message: streamError });
+        }
         void loadConversations(true);
       } catch (err) {
-        const message = getApiErrorMessage(
-          err,
-          "The question couldn't be answered. Check that Ollama is running and try again.",
-        );
-        setFailed({ question: text, message });
+        if ((err as { name?: string })?.name === "AbortError") {
+          if (started) update((m) => ({ ...m, streaming: false, status: "stopped" }));
+          void loadConversations(true);
+        } else {
+          const message = getApiErrorMessage(
+            err,
+            "The question couldn't be answered. Check that Ollama is running and try again.",
+          );
+          setFailed({ question: text, message });
+        }
       } finally {
+        abortRef.current = null;
+        if (started) update((m) => ({ ...m, streaming: false }));
         setIsAsking(false);
         focusInput();
       }
     },
     [conversationId, isAsking, loadConversations],
   );
+
+  const stop = useCallback(() => abortRef.current?.abort(), []);
 
   const startNewConversation = useCallback(() => {
     setMessages([]);
@@ -219,7 +257,10 @@ export default function AIWorkspace() {
             role: m.role === "user" ? "user" : "assistant",
             content: m.content,
             createdAt: m.created_at,
-            sources: [],
+            sources: m.sources ?? [],
+            serverId: m.role === "assistant" ? m.id : undefined,
+            status: m.answer_status ?? null,
+            feedback: m.feedback_rating ?? null,
             fromHistory: true,
           })),
         );
@@ -411,7 +452,7 @@ export default function AIWorkspace() {
                 />
               ))}
 
-              {isAsking && <ThinkingTurn modelName={modelName} />}
+              {isAsking && !messages.some((m) => m.streaming) && <ThinkingTurn modelName={modelName} />}
 
               {failed && !isAsking && (
                 <Box
@@ -483,6 +524,7 @@ export default function AIWorkspace() {
             onChange={setQuery}
             onSubmit={() => void ask(query)}
             busy={isAsking || loadingConversation}
+            onStop={isAsking ? stop : undefined}
             disabled={licenseBlocked}
             disabledReason="The license has expired — an admin needs to renew it before questions can be asked."
           />

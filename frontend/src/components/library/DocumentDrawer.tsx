@@ -85,9 +85,15 @@ export default function DocumentDrawer({ document, open, canDelete, onClose, onD
                 {doc.filename}
               </Typography>
               <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mt: 0.75 }}>
-                <StatusDot tone={doc.processed ? "retrieve" : "warning"} size={7} />
+                <StatusDot tone={doc.status === "failed" ? "danger" : doc.processed ? "retrieve" : "warning"} size={7} />
                 <Typography sx={{ fontSize: "0.8125rem", color: "text.secondary" }}>
-                  {doc.processed ? "Indexed — used to answer questions" : "Not indexed — not used in answers"}
+                  {doc.status === "queued" || doc.status === "processing"
+                    ? "Indexing in the background…"
+                    : doc.status === "failed"
+                      ? `Failed — ${doc.error_message ?? "not used in answers"}`
+                      : doc.processed
+                        ? `Indexed — used to answer questions${doc.chunk_count ? ` (${doc.chunk_count} passages)` : ""}`
+                        : "Not indexed — not used in answers"}
                 </Typography>
               </Box>
             </Box>
@@ -108,6 +114,8 @@ export default function DocumentDrawer({ document, open, canDelete, onClose, onD
                 "Shared with your organisation"
               ) : details?.visibility === "PRIVATE" ? (
                 "Private to the uploader"
+              ) : details?.visibility === "GROUP" ? (
+                `Team space: ${details?.group_name ?? "—"}`
               ) : (
                 "—"
               )}

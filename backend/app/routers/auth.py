@@ -1,170 +1,86 @@
-from datetime import timedelta
+from datetime import datetime
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    Request,
-    status,
-)
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import ALLOW_SELF_REGISTRATION, LOGIN_RATE_LIMIT, REGISTER_RATE_LIMIT
 from app.core.rate_limit import limiter
-from app.core.security import (
-    create_access_token,
-    hash_password,
-    verify_password,
-)
+from app.core.security import burn_password_check, create_access_token, hash_password, verify_password
 from app.database.connection import get_db
-from app.dependencies.auth import (
-    get_current_user,
-    require_roles,
-)
+from app.dependencies.auth import get_current_user
 from app.models.role import Role
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.schemas.auth import (
-    ChangePasswordRequest,
-    LoginRequest,
-    RegisterRequest,
-)
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, RegisterRequest
+from app.services import audit_service
+from app.services.license_service import LicenseService
+
+router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+DEFAULT_TENANT = "Default Tenant"
 
 
-# ============================================================
-# ROUTER
-# ============================================================
-
-router = APIRouter(
-    prefix="/auth",
-    tags=["Authentication"],
-)
-
-
-# --------------------------------------------------
-# Authentication Test
-# --------------------------------------------------
-
-@router.get("/test")
-def authentication_test():
+@router.get("/setup-status")
+def setup_status(db: Session = Depends(get_db)):
+    """Tells the login page whether first-run setup or sign-up is available."""
+    has_users = db.scalar(select(func.count(User.id))) > 0
     return {
-        "message": "Authentication router is working"
+        "needs_setup": not has_users,
+        "self_registration": ALLOW_SELF_REGISTRATION or not has_users,
     }
 
 
-# --------------------------------------------------
-# User Registration
-# --------------------------------------------------
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+@limiter.limit(REGISTER_RATE_LIMIT)
+def register(request: Request, user_data: RegisterRequest, db: Session = Depends(get_db)):
+    """
+    First run (no users yet): creates the first account as ADMIN.
+    Afterwards: allowed only when ALLOW_SELF_REGISTRATION=true, as USER.
+    Admins add people from the Users page instead.
+    """
 
-@router.post(
-    "/register",
-    status_code=status.HTTP_201_CREATED,
-)
-def register(
-    user_data: RegisterRequest,
-    db: Session = Depends(get_db),
-):
-    # --------------------------------------------------
-    # Check if username already exists
-    # --------------------------------------------------
+    first_user = db.scalar(select(func.count(User.id))) == 0
 
-    existing_username = db.scalar(
-        select(User).where(
-            User.username == user_data.username
-        )
-    )
-
-    if existing_username:
+    if not first_user and not ALLOW_SELF_REGISTRATION:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already registered",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Self-registration is disabled. Ask your administrator to create an account.",
         )
 
-    # --------------------------------------------------
-    # Check if email already exists
-    # --------------------------------------------------
+    if db.scalar(select(User).where(User.username == user_data.username)):
+        raise HTTPException(status_code=400, detail="Username already registered")
+    if db.scalar(select(User).where(func.lower(User.email) == user_data.email.lower())):
+        raise HTTPException(status_code=400, detail="Email already registered")
 
-    existing_email = db.scalar(
-        select(User).where(
-            User.email == user_data.email
-        )
-    )
+    tenant = db.scalar(select(Tenant).where(Tenant.name == DEFAULT_TENANT))
+    role = db.scalar(select(Role).where(Role.name == ("ADMIN" if first_user else "USER")))
+    if tenant is None or role is None:
+        raise HTTPException(status_code=500, detail="Server is not initialised. Run the database bootstrap.")
 
-    if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered",
-        )
-
-    # --------------------------------------------------
-    # Get Default Tenant
-    # --------------------------------------------------
-
-    default_tenant = db.scalar(
-        select(Tenant).where(
-            Tenant.name == "Default Tenant"
-        )
-    )
-
-    if not default_tenant:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Default tenant not configured",
-        )
-
-    # --------------------------------------------------
-    # Get Default USER Role
-    # --------------------------------------------------
-
-    user_role = db.scalar(
-        select(Role).where(
-            Role.name == "USER"
-        )
-    )
-
-    if not user_role:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Default USER role not configured",
-        )
-
-    # --------------------------------------------------
-    # Hash Password
-    # --------------------------------------------------
-
-    hashed_password = hash_password(
-        user_data.password
-    )
-
-    # --------------------------------------------------
-    # Create New User
-    # --------------------------------------------------
+    if not first_user:
+        _enforce_user_limit(db, tenant.id)
 
     new_user = User(
         username=user_data.username,
         email=user_data.email,
-        password_hash=hashed_password,
-        tenant_id=default_tenant.id,
-        role_id=user_role.id,
+        password_hash=hash_password(user_data.password),
+        tenant_id=tenant.id,
+        role_id=role.id,
     )
-
     db.add(new_user)
-
     try:
         db.commit()
         db.refresh(new_user)
-
     except Exception:
         db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to create user")
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user",
-        )
-
-    # --------------------------------------------------
-    # Registration Response
-    # --------------------------------------------------
+    audit_service.record(
+        "user.registered", actor=new_user, target_type="user", target_id=new_user.id,
+        target_label=new_user.username, details={"role": role.name, "first_admin": first_user},
+        request=request,
+    )
 
     return {
         "message": "User registered successfully",
@@ -172,92 +88,56 @@ def register(
             "id": str(new_user.id),
             "username": new_user.username,
             "email": new_user.email,
-            "role": user_role.name,
+            "role": role.name,
             "tenant_id": str(new_user.tenant_id),
-            "tenant_name": default_tenant.name,
+            "tenant_name": tenant.name,
         },
     }
 
 
-# --------------------------------------------------
-# User Login
-# --------------------------------------------------
+def _enforce_user_limit(db: Session, tenant_id) -> None:
+    state = LicenseService.evaluate(db, tenant_id, record_time=False)
+    if state.payload and state.payload.get("max_users"):
+        count = db.scalar(select(func.count(User.id)).where(User.tenant_id == tenant_id))
+        if count >= int(state.payload["max_users"]):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Your licence allows {state.payload['max_users']} users. Remove a user or upgrade the licence.",
+            )
+
 
 @router.post("/login")
-@limiter.limit("5/minute")
-def login(
-    request: Request,
-    login_data: LoginRequest,
-    db: Session = Depends(get_db),
-):
-    # --------------------------------------------------
-    # Find User
-    # --------------------------------------------------
+@limiter.limit(LOGIN_RATE_LIMIT)
+def login(request: Request, login_data: LoginRequest, db: Session = Depends(get_db)):
+    user = db.scalar(select(User).where(User.username == login_data.username))
 
-    user = db.scalar(
-        select(User).where(
-            User.username == login_data.username
-        )
-    )
+    if user is None:
+        burn_password_check(login_data.password)  # same timing as a real check
+        audit_service.record("auth.login", outcome="failure", actor_username=login_data.username[:100],
+                             details={"reason": "unknown_user"}, request=request)
+        raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    # Don't reveal whether username exists
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
+    if not verify_password(login_data.password, user.password_hash):
+        audit_service.record("auth.login", actor=user, outcome="failure",
+                             details={"reason": "bad_password"}, request=request)
+        raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    # --------------------------------------------------
-    # Verify Password
-    # --------------------------------------------------
+    if not user.is_active:
+        audit_service.record("auth.login", actor=user, outcome="failure",
+                             details={"reason": "deactivated"}, request=request)
+        raise HTTPException(status_code=403, detail="This account has been deactivated.")
 
-    if not verify_password(
-        login_data.password,
-        user.password_hash,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
+    user.last_login_at = datetime.utcnow()
+    db.commit()
 
-    # --------------------------------------------------
-    # Create JWT Access Token
-    # --------------------------------------------------
+    token = create_access_token({"sub": str(user.id), "role": user.role.name, "ver": user.token_version})
+    audit_service.record("auth.login", actor=user, request=request)
 
-    access_token = create_access_token(
-        data={
-            "sub": str(user.id),
-            "role": user.role.name,
-        },
-        expires_delta=timedelta(minutes=30),
-    )
+    return {"access_token": token, "token_type": "bearer"}
 
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-    }
-
-
-# --------------------------------------------------
-# Current User Profile
-# --------------------------------------------------
 
 @router.get("/me")
-def get_my_profile(
-    current_user: User = Depends(get_current_user),
-):
-    if not current_user.role:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User role is not configured",
-        )
-
-    if not current_user.tenant:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User tenant is not configured",
-        )
-
+def get_my_profile(current_user: User = Depends(get_current_user)):
     return {
         "id": str(current_user.id),
         "username": current_user.username,
@@ -268,111 +148,33 @@ def get_my_profile(
     }
 
 
-# --------------------------------------------------
-# Change Password
-# --------------------------------------------------
-
 @router.patch("/change-password")
 def change_password(
+    request: Request,
     password_data: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not verify_password(
-        password_data.current_password,
-        current_user.password_hash,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Current password is incorrect",
-        )
+    if not verify_password(password_data.current_password, current_user.password_hash):
+        audit_service.record("auth.password_change", actor=current_user, outcome="failure", request=request)
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
 
-    if (
-        password_data.current_password
-        == password_data.new_password
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "New password must be different "
-                "from current password"
-            ),
-        )
+    if password_data.current_password == password_data.new_password:
+        raise HTTPException(status_code=400, detail="New password must be different from current password")
 
-    current_user.password_hash = hash_password(
-        password_data.new_password
-    )
+    current_user.password_hash = hash_password(password_data.new_password)
+    # Log out every other session that used the old password.
+    current_user.token_version = (current_user.token_version or 0) + 1
 
     try:
         db.commit()
-
     except Exception:
         db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to change password")
 
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to change password",
-        )
+    audit_service.record("auth.password_change", actor=current_user, request=request)
 
-    return {
-        "message": "Password changed successfully"
-    }
-
-
-# --------------------------------------------------
-# RBAC Test - ADMIN
-# --------------------------------------------------
-
-@router.get("/admin-test")
-def admin_test(
-    current_user: User = Depends(
-        require_roles("ADMIN")
-    ),
-):
-    return {
-        "message": "Admin access granted",
-        "username": current_user.username,
-        "role": current_user.role.name,
-        "tenant_id": str(current_user.tenant_id),
-    }
-
-
-# --------------------------------------------------
-# RBAC Test - USER
-# --------------------------------------------------
-
-@router.get("/user-test")
-def user_test(
-    current_user: User = Depends(
-        require_roles("ADMIN", "USER")
-    ),
-):
-    return {
-        "message": "User access granted",
-        "username": current_user.username,
-        "role": current_user.role.name,
-        "tenant_id": str(current_user.tenant_id),
-    }
-
-
-# --------------------------------------------------
-# RBAC Test - VIEWER
-# --------------------------------------------------
-
-@router.get("/viewer-test")
-def viewer_test(
-    current_user: User = Depends(
-        require_roles(
-            "ADMIN",
-            "USER",
-            "VIEWER",
-        )
-    ),
-):
-    return {
-        "message": "Authenticated user access granted",
-        "username": current_user.username,
-        "role": current_user.role.name,
-        "tenant_id": str(current_user.tenant_id),
-    }
-
+    token = create_access_token(
+        {"sub": str(current_user.id), "role": current_user.role.name, "ver": current_user.token_version}
+    )
+    return {"message": "Password changed successfully", "access_token": token, "token_type": "bearer"}

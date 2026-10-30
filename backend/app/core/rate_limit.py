@@ -1,26 +1,27 @@
+"""
+Rate limiting.
 
-try:
-    from slowapi import Limiter  # type: ignore[reportMissingImports]
-    from slowapi.util import get_remote_address  # type: ignore[reportMissingImports]
-except ImportError:  # pragma: no cover - fallback for environments without slowapi
-    class Limiter:
-        def __init__(self, *args, **kwargs):
+Authenticated requests are limited per user (JWT subject), so users behind
+the same office IP do not block each other. Anonymous requests (login,
+register) are limited per IP address.
+"""
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from starlette.requests import Request
+
+from app.core.security import TokenError, decode_access_token
+
+
+def user_or_ip_key(request: Request) -> str:
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        try:
+            payload = decode_access_token(auth[7:].strip())
+            return f"user:{payload['sub']}"
+        except TokenError:
             pass
-
-        def limit(self, *args, **kwargs):
-            def decorator(func):
-                return func
-
-            return decorator
-
-    def get_remote_address(request):
-        return request.client.host if request and request.client else "127.0.0.1"
+    return f"ip:{get_remote_address(request)}"
 
 
-# ============================================================
-# RAGENTIS RATE LIMITER
-# ============================================================
-
-limiter = Limiter(
-    key_func=get_remote_address
-)
+limiter = Limiter(key_func=user_or_ip_key)

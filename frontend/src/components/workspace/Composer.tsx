@@ -2,6 +2,7 @@ import { forwardRef, type KeyboardEvent } from "react";
 import { Box, IconButton, InputBase, Tooltip, Typography } from "@mui/material";
 import ArrowUpwardRoundedIcon from "@mui/icons-material/ArrowUpwardRounded";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
+import StopRoundedIcon from "@mui/icons-material/StopRounded";
 
 interface ComposerProps {
   value: string;
@@ -10,12 +11,14 @@ interface ComposerProps {
   busy: boolean;
   disabled?: boolean;
   disabledReason?: string;
+  /** When set and busy, the send button becomes a Stop button. */
+  onStop?: () => void;
 }
 
 const MAX_LENGTH = 2000;
 
 const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer(
-  { value, onChange, onSubmit, busy, disabled = false, disabledReason },
+  { value, onChange, onSubmit, busy, disabled = false, disabledReason, onStop },
   ref,
 ) {
   const canSend = value.trim().length > 0 && !busy && !disabled;
@@ -62,6 +65,25 @@ const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Compose
           inputProps={{ "aria-label": "Your question" }}
           sx={{ py: 0.9, fontSize: "0.9375rem", lineHeight: 1.55 }}
         />
+        {busy && onStop ? (
+          <Tooltip title="Stop generating">
+            <IconButton
+              onClick={onStop}
+              aria-label="Stop generating"
+              sx={(theme) => ({
+                width: 38,
+                height: 38,
+                mb: 0.1,
+                borderRadius: "11px",
+                color: "#fff",
+                bgcolor: theme.palette.rag.danger,
+                "&:hover": { bgcolor: theme.palette.rag.danger, filter: "brightness(1.1)" },
+              })}
+            >
+              <StopRoundedIcon sx={{ fontSize: 19 }} />
+            </IconButton>
+          </Tooltip>
+        ) : (
         <Tooltip title={canSend ? "Send (Enter)" : ""}>
           <span>
             <IconButton
@@ -84,6 +106,7 @@ const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Compose
             </IconButton>
           </span>
         </Tooltip>
+        )}
       </Box>
 
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, mt: 0.9, px: 0.5 }}>

@@ -284,7 +284,7 @@ export default function Dashboard() {
   /* ---------- derived, all from API responses ---------- */
   const documents = docs.data;
   const total = documents.length;
-  const indexed = documents.filter((d) => d.processed).length;
+  const indexed = documents.filter((d) => (d.status ?? (d.processed ? "ready" : "failed")) === "ready").length;
   const notIndexed = total - indexed;
   const coverage = total ? Math.round((indexed / total) * 100) : 0;
   const animatedCoverage = useCountUp(docs.loading ? 0 : coverage);
@@ -307,7 +307,7 @@ export default function Dashboard() {
   const daysLeft = lic
     ? Math.ceil((getTimestamp(lic.expires_at) - Date.now()) / 86_400_000)
     : null;
-  const licenseValid = Boolean(license.data?.licensed && lic?.is_active && (daysLeft ?? 0) > 0);
+  const licenseValid = Boolean(license.data?.licensed);
 
   const s = system.status;
 

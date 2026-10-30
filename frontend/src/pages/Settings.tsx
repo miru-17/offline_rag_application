@@ -68,6 +68,7 @@ export default function Settings() {
   // RAG Settings
   const [retrievalDepth, setRetrievalDepth] = useState(5);
   const [sourceAttribution, setSourceAttribution] = useState(true);
+  const [piiMode, setPiiMode] = useState<"off" | "flag" | "redact">("flag");
   const [ragLoading, setRagLoading] = useState(true);
   const [ragSaving, setRagSaving] = useState(false);
   const [ragError, setRagError] = useState("");
@@ -81,6 +82,7 @@ export default function Settings() {
         const settings = await getRAGSettings();
         setRetrievalDepth(settings.retrieval_depth);
         setSourceAttribution(settings.source_attribution);
+        setPiiMode(settings.pii_mode ?? "flag");
       } catch (error: any) {
         const detail = error?.response?.data?.detail;
         setRagError(detail || "Unable to load RAG hyperparameters.");
@@ -92,7 +94,7 @@ export default function Settings() {
     void loadRAG();
   }, []);
 
-  const saveRAG = async (depth: number, attribution: boolean) => {
+  const saveRAG = async (depth: number, attribution: boolean, pii: "off" | "flag" | "redact" = piiMode) => {
     if (!isAdmin) return;
     try {
       setRagSaving(true);
@@ -102,7 +104,9 @@ export default function Settings() {
       const updated = await updateRAGSettings({
         retrieval_depth: depth,
         source_attribution: attribution,
+        pii_mode: pii,
       });
+      setPiiMode(updated.pii_mode ?? pii);
 
       setRetrievalDepth(updated.retrieval_depth);
       setSourceAttribution(updated.source_attribution);
@@ -305,6 +309,36 @@ export default function Settings() {
                   }}
                   color="primary"
                 />
+              </Box>
+
+              <Divider />
+
+              {/* Personal data protection */}
+              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    Personal data (PII) protection
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Detects Aadhaar, PAN, phone, email, IFSC and card numbers in new uploads. Redact hides them from the
+                    AI completely. Applies to documents uploaded after the change.
+                  </Typography>
+                </Box>
+                <Select
+                  size="small"
+                  value={piiMode}
+                  disabled={!isAdmin || ragSaving}
+                  onChange={(e) => {
+                    const next = e.target.value as "off" | "flag" | "redact";
+                    setPiiMode(next);
+                    void saveRAG(retrievalDepth, sourceAttribution, next);
+                  }}
+                  sx={{ minWidth: 190 }}
+                >
+                  <MenuItem value="off">Off</MenuItem>
+                  <MenuItem value="flag">Detect and flag</MenuItem>
+                  <MenuItem value="redact">Detect and redact</MenuItem>
+                </Select>
               </Box>
             </Stack>
           )}

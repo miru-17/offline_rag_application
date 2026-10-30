@@ -1,40 +1,101 @@
 """
-RAG Service
+RAG pipeline:
 
-Complete RAG generation pipeline:
-
-User Query
-    ↓
-User + Tenant Validation
-    ↓
-Retrieval Service
-    ↓
-Query Embedding
-    ↓
-User-Specific ChromaDB Similarity Search
-    ↓
-Tenant + User Filtered Retrieved Chunks
-    ↓
-Context Builder
-    ↓
-Prompt Builder
-    ↓
-Ollama / Local LLM
-    ↓
-Final Answer + Sources
+question -> (follow-up context) -> retrieval with access filters
+         -> evidence excerpts -> guarded prompt -> local LLM -> answer + sources
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from app.services.ollama_service import generate_answer as llm_generate
+from app.services.ollama_service import stream_answer
+from app.services.prompt_builder import NOT_FOUND_ANSWER, build_prompt
 from app.services.retrieval_service import RetrievalService
-from app.services.context_builder import ContextBuilder
-from app.services.prompt_builder import build_prompt
-from app.services.ollama_service import generate_answer
+
+EXCERPT_CHARS = 400
+FOLLOW_UP_MAX_WORDS = 8
+
+
+@dataclass
+class PreparedQuery:
+    found: bool
+    prompt: str = ""
+    sources: list[dict] = field(default_factory=list)
+
+
+def looks_like_not_found(answer: str) -> bool:
+    text = (answer or "").lower()
+    return (
+        "cannot answer this question" in text
+        or "could not find the answer" in text
+        or "not in your uploaded documents" in text
+    )
 
 
 class RAGService:
 
     def __init__(self):
         self.retrieval_service = RetrievalService()
-        self.context_builder = ContextBuilder()
+
+    @staticmethod
+    def _retrieval_query(query: str, history: list[dict] | None) -> str:
+        """Short follow-ups ("explain that more") reuse the previous question."""
+        if not history or len(query.split()) > FOLLOW_UP_MAX_WORDS:
+            return query
+        previous = next((t["content"] for t in reversed(history) if t.get("role") == "user"), None)
+        return f"{previous} {query}" if previous else query
+
+    def prepare(
+        self,
+        query: str,
+        user_id: str,
+        tenant_id: str,
+        top_k: int = 5,
+        group_ids: list[str] | None = None,
+        history: list[dict] | None = None,
+        document_id: str | None = None,
+    ) -> PreparedQuery:
+        if not user_id or not tenant_id:
+            raise ValueError("User and tenant are required for RAG.")
+
+        results = self.retrieval_service.retrieve(
+            query=self._retrieval_query(query, history),
+            user_id=user_id,
+            tenant_id=tenant_id,
+            top_k=top_k,
+            group_ids=group_ids,
+            document_id=document_id,
+        )
+
+        documents = results.get("documents", [[]])[0]
+        if not documents:
+            return PreparedQuery(found=False)
+
+        metadatas = results.get("metadatas", [[]])[0]
+        distances = results.get("distances", [[]])[0]
+
+        excerpts, sources = [], []
+        for index, text in enumerate(documents):
+            metadata = metadatas[index] or {}
+            page = metadata.get("page")
+            sheet = metadata.get("sheet")
+            location = f"page {page}" if page else (f"sheet {sheet}" if sheet else "")
+            excerpts.append({"filename": metadata.get("filename", "document"), "location": location, "text": text})
+            sources.append({
+                "ref": index + 1,
+                "document_id": metadata.get("document_id", ""),
+                "filename": str(metadata.get("filename", "Unknown document")).strip(),
+                "page": int(page) if page else None,
+                "sheet": sheet or None,
+                "chunk_index": metadata.get("chunk_index", 0),
+                "excerpt": text[:EXCERPT_CHARS] + ("…" if len(text) > EXCERPT_CHARS else ""),
+                "score": round(max(0.0, 1.0 - float(distances[index])), 3),
+            })
+
+        prompt = build_prompt(query=query, excerpts=excerpts, history=history)
+        return PreparedQuery(found=True, prompt=prompt, sources=sources)
 
     def generate_answer(
         self,
@@ -42,222 +103,16 @@ class RAGService:
         user_id: str,
         tenant_id: str,
         top_k: int = 5,
+        group_ids: list[str] | None = None,
+        history: list[dict] | None = None,
     ) -> dict:
-        """
-        Generate an answer and source references
-        using documents belonging to the current user
-        and tenant.
-        """
+        prepared = self.prepare(query, user_id, tenant_id, top_k, group_ids, history)
+        if not prepared.found:
+            return {"answer": NOT_FOUND_ANSWER, "sources": [], "status": "not_found"}
 
-        # --------------------------------------------------
-        # 1. Validate user
-        # --------------------------------------------------
+        answer = llm_generate(prepared.prompt)
+        status = "not_found" if looks_like_not_found(answer) else "answered"
+        return {"answer": answer, "sources": prepared.sources if status == "answered" else [], "status": status}
 
-        if not user_id:
-            raise ValueError(
-                "User ID is required for RAG."
-            )
-
-        # --------------------------------------------------
-        # 2. Validate tenant
-        # --------------------------------------------------
-
-        if not tenant_id:
-            raise ValueError(
-                "Tenant ID is required for RAG."
-            )
-
-        # --------------------------------------------------
-        # 3. Retrieve relevant chunks
-        # --------------------------------------------------
-
-        results = self.retrieval_service.retrieve(
-            query=query,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            top_k=top_k,
-        )
-
-        # --------------------------------------------------
-        # 4. Check whether relevant chunks were found
-        # --------------------------------------------------
-
-        documents = results.get(
-            "documents",
-            [[]],
-        )[0]
-
-        if not documents:
-            return {
-                "answer": (
-                    "I cannot answer this question as it is "
-                    "not in your uploaded documents."
-                ),
-                "sources": [],
-            }
-
-        # --------------------------------------------------
-        # 5. Build context
-        # --------------------------------------------------
-
-        context = self.context_builder.build_context(
-            results
-        )
-
-        # --------------------------------------------------
-        # 6. Build prompt
-        # --------------------------------------------------
-
-        prompt = build_prompt(
-            query=query,
-            context=context,
-        )
-
-        # --------------------------------------------------
-        # 7. Generate answer using Ollama
-        # --------------------------------------------------
-
-        answer = generate_answer(prompt)
-
-        # --------------------------------------------------
-        # 8. Extract source information
-        # --------------------------------------------------
-
-        metadatas = results.get(
-            "metadatas",
-            [[]],
-        )[0]
-
-        sources = []
-        seen_sources = set()
-
-        for metadata in metadatas:
-
-            if not metadata:
-                continue
-
-            # ----------------------------------------------
-            # Filename
-            # ----------------------------------------------
-
-            filename = (
-                metadata.get("filename")
-                or metadata.get("file_name")
-                or metadata.get("document_name")
-                or "Unknown document"
-            )
-
-            # ----------------------------------------------
-            # Document ID
-            # ----------------------------------------------
-
-            document_id = (
-                metadata.get("document_id")
-                or ""
-            )
-
-            # ----------------------------------------------
-            # Chunk index
-            # ----------------------------------------------
-
-            chunk_index = metadata.get(
-                "chunk_index",
-                0,
-            )
-
-            # ----------------------------------------------
-            # Page number
-            # ----------------------------------------------
-
-            page = (
-                metadata.get("page")
-                or metadata.get("page_number")
-                or metadata.get("pageNumber")
-            )
-
-            if page is None:
-                page = metadata.get("source_page")
-
-            # ----------------------------------------------
-            # Normalize page number
-            # ----------------------------------------------
-
-            if page is not None:
-                try:
-                    page = int(page)
-                except (TypeError, ValueError):
-                    page = str(page).strip()
-
-            # ----------------------------------------------
-            # Create unique source key
-            # ----------------------------------------------
-
-            source_key = (
-                str(document_id),
-                str(filename).strip().lower(),
-                str(page),
-            )
-
-            if source_key in seen_sources:
-                continue
-
-            seen_sources.add(source_key)
-
-            source = {
-                "filename": str(filename).strip(),
-                "page": page,
-                "chunk_index": chunk_index,
-                "document_id": document_id,
-            }
-
-            sources.append(source)
-
-        # --------------------------------------------------
-        # 9. Return final response
-        # --------------------------------------------------
-
-        return {
-            "answer": answer,
-            "sources": sources,
-        }
-
-
-# --------------------------------------------------
-# Local Testing
-# --------------------------------------------------
-
-if __name__ == "__main__":
-
-    rag_service = RAGService()
-
-    test_query = (
-        "What is backpropagation?"
-    )
-
-    test_user_id = (
-        "3563baeb-634c-4df8-a907-480f12825e4b"
-    )
-
-    test_tenant_id = (
-        "53a1856a-d4d1-472d-b6ab-02e5aec46c44"
-    )
-
-    result = rag_service.generate_answer(
-        query=test_query,
-        user_id=test_user_id,
-        tenant_id=test_tenant_id,
-        top_k=5,
-    )
-
-    print("=" * 60)
-    print("RAG ANSWER")
-    print("=" * 60)
-
-    print(result["answer"])
-
-    print("\n" + "=" * 60)
-    print("SOURCES")
-    print("=" * 60)
-
-    for source in result["sources"]:
-        print(source)
+    def stream(self, prepared: PreparedQuery, stop=None):
+        return stream_answer(prepared.prompt, stop=stop)

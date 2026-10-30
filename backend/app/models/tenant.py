@@ -39,6 +39,14 @@ class Tenant(Base):
         server_default="true",
     )
 
+    # off | flag | redact  -- personal data handling during ingestion.
+    pii_mode: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="flag",
+        server_default="flag",
+    )
+
     users = relationship(
         "User",
         back_populates="tenant",

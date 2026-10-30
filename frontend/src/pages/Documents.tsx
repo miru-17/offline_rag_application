@@ -28,11 +28,23 @@ import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined";
 import SearchOffRoundedIcon from "@mui/icons-material/SearchOffRounded";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
+import ReplayRoundedIcon from "@mui/icons-material/ReplayRounded";
+import SummarizeOutlinedIcon from "@mui/icons-material/SummarizeOutlined";
+import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
 
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthContext";
-import { deleteDocument, getDocuments, type DocumentItem } from "../api/documents.api";
+import {
+  deleteDocument,
+  getDocuments,
+  retryDocument,
+  summarizeDocument,
+  type DocumentItem,
+  type SummaryResult,
+  type Visibility,
+} from "../api/documents.api";
+import { getGroups, type TeamSpace } from "../api/groups.api";
 import PageHeader from "../components/common/PageHeader";
 import EmptyState from "../components/common/EmptyState";
 import FileTypeIcon from "../components/common/FileTypeIcon";
@@ -51,6 +63,27 @@ import {
 } from "../utils/format";
 
 type StatusFilter = "all" | "indexed" | "not-indexed";
+
+/** Processing state from the background indexer. */
+const docState = (d: DocumentItem) => d.status ?? (d.processed ? "ready" : "failed");
+const isReady = (d: DocumentItem) => docState(d) === "ready";
+const STATE_LABEL: Record<string, string> = {
+  ready: "Indexed",
+  queued: "Queued",
+  processing: "Indexing…",
+  failed: "Failed",
+};
+const STATE_TONE: Record<string, "retrieve" | "warning" | "danger"> = {
+  ready: "retrieve",
+  queued: "warning",
+  processing: "warning",
+  failed: "danger",
+};
+const VISIBILITY_LABEL: Record<string, string> = {
+  PRIVATE: "Private",
+  TENANT: "Organisation",
+  GROUP: "Team space",
+};
 type SortKey = "newest" | "oldest" | "name";
 
 interface NavState {
@@ -145,6 +178,12 @@ export default function Documents() {
   const [toDelete, setToDelete] = useState<DocumentItem | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [visibility, setVisibility] = useState<Visibility>(isAdmin ? "TENANT" : "PRIVATE");
+  const [groupId, setGroupId] = useState("");
+  const [groups, setGroups] = useState<TeamSpace[]>([]);
+  const [summary, setSummary] = useState<SummaryResult | null>(null);
+  const [summaryFor, setSummaryFor] = useState<string | null>(null);
+
   /* ---------------- load ---------------- */
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -181,12 +220,52 @@ export default function Documents() {
     // Run once on mount; navigation state is consumed immediately.
   }, []); // eslint-disable-line
 
+  useEffect(() => {
+    getGroups().then(setGroups).catch(() => setGroups([]));
+  }, []);
+
+  // Refresh quietly while documents are still being indexed in the background.
+  const hasPending = documents.some((d) => docState(d) === "queued" || docState(d) === "processing");
+  useEffect(() => {
+    if (!hasPending) return;
+    const timer = window.setInterval(() => void load(true), 3000);
+    return () => window.clearInterval(timer);
+  }, [hasPending, load]);
+
+  const retry = async (doc: DocumentItem) => {
+    try {
+      await retryDocument(doc.id);
+      toast.success(`“${doc.filename}” queued again`);
+      void load(true);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Couldn't retry this document."));
+    }
+  };
+
+  const summarise = async (doc: DocumentItem) => {
+    setSummary(null);
+    setSummaryFor(doc.filename);
+    try {
+      setSummary(await summarizeDocument(doc.id));
+    } catch (err) {
+      setSummaryFor(null);
+      toast.error(getApiErrorMessage(err, "Couldn't summarise this document."));
+    }
+  };
+
+  const sharingLabel =
+    visibility === "TENANT"
+      ? `Files you upload are shared with everyone in ${user?.tenant_name ?? "your organisation"}.`
+      : visibility === "GROUP"
+        ? `Files you upload are shared with the ${groups.find((g) => g.id === groupId)?.name ?? "selected"} team space only.`
+        : "Files you upload are private to you.";
+
   /* ---------------- derived ---------------- */
   const counts = useMemo(
     () => ({
       all: documents.length,
-      indexed: documents.filter((d) => d.processed).length,
-      notIndexed: documents.filter((d) => !d.processed).length,
+      indexed: documents.filter(isReady).length,
+      notIndexed: documents.filter((d) => !isReady(d)).length,
     }),
     [documents],
   );
@@ -195,8 +274,8 @@ export default function Documents() {
     const needle = search.trim().toLowerCase();
     const list = documents.filter((d) => {
       if (needle && !d.filename.toLowerCase().includes(needle)) return false;
-      if (status === "indexed" && !d.processed) return false;
-      if (status === "not-indexed" && d.processed) return false;
+      if (status === "indexed" && !isReady(d)) return false;
+      if (status === "not-indexed" && isReady(d)) return false;
       if (kind !== "all" && getFileKind(d.filename, d.file_type) !== kind) return false;
       return true;
     });
@@ -289,12 +368,34 @@ export default function Documents() {
       {canUpload && (
         <Collapse in={uploadOpen || libraryEmpty} unmountOnExit>
           <Box sx={{ mb: 2.5 }}>
-            <UploadZone
-              isAdmin={isAdmin}
-              tenantName={user?.tenant_name}
-              large={libraryEmpty}
-              onUploaded={() => void load(true)}
-            />
+            <Box sx={{ display: "flex", gap: 1.5, mb: 1.5, flexWrap: "wrap", alignItems: "center" }}>
+              <Typography sx={{ fontSize: "0.8125rem", color: "text.secondary" }}>Who can use these files:</Typography>
+              <Select size="small" value={visibility} onChange={(e) => setVisibility(e.target.value as Visibility)}
+                      sx={{ minWidth: 190, fontSize: "0.8125rem" }} inputProps={{ "aria-label": "Who can use these files" }}>
+                <MenuItem value="PRIVATE">Only me (private)</MenuItem>
+                {isAdmin && <MenuItem value="TENANT">Whole organisation</MenuItem>}
+                <MenuItem value="GROUP" disabled={groups.length === 0}>A team space</MenuItem>
+              </Select>
+              {visibility === "GROUP" && (
+                <Select size="small" value={groupId} displayEmpty onChange={(e) => setGroupId(e.target.value)}
+                        sx={{ minWidth: 190, fontSize: "0.8125rem" }} inputProps={{ "aria-label": "Team space" }}>
+                  <MenuItem value="" disabled>Choose a team space</MenuItem>
+                  {groups.map((g) => <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>)}
+                </Select>
+              )}
+            </Box>
+            {visibility === "GROUP" && !groupId ? (
+              <Alert severity="info">Choose a team space first.</Alert>
+            ) : (
+              <UploadZone
+                isAdmin={isAdmin}
+                tenantName={user?.tenant_name}
+                large={libraryEmpty}
+                onUploaded={() => void load(true)}
+                uploadOptions={{ visibility, groupId: visibility === "GROUP" ? groupId : undefined }}
+                sharingLabel={sharingLabel}
+              />
+            )}
           </Box>
         </Collapse>
       )}
@@ -487,9 +588,25 @@ export default function Documents() {
                       <Typography noWrap sx={{ fontSize: "0.8438rem", fontWeight: 520 }} title={doc.filename}>
                         {doc.filename}
                       </Typography>
+                      <Typography noWrap sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 0.75, fontSize: "0.72rem", color: "text.secondary" }}>
+                        {VISIBILITY_LABEL[doc.visibility ?? "PRIVATE"]}
+                        {doc.group_name ? ` · ${doc.group_name}` : ""}
+                        {doc.page_count ? ` · ${doc.page_count} pages` : ""}
+                        {isAdmin && doc.owner ? ` · ${doc.owner}` : ""}
+                        {doc.pii_summary && doc.pii_summary.total > 0 && (
+                          <Tooltip title={`Personal data ${doc.pii_summary.mode === "redact" ? "redacted" : "found"}: ` +
+                            Object.entries(doc.pii_summary.counts).map(([k, v]) => `${k} ${v}`).join(", ")}>
+                            <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 0.3,
+                                                         color: doc.pii_summary.mode === "redact" ? "success.main" : "warning.main" }}>
+                              <ShieldOutlinedIcon sx={{ fontSize: 13 }} />
+                              {doc.pii_summary.mode === "redact" ? "PII redacted" : "Contains PII"}
+                            </Box>
+                          </Tooltip>
+                        )}
+                      </Typography>
                       <Typography sx={{ display: { xs: "flex", md: "none" }, alignItems: "center", gap: 0.75, fontSize: "0.72rem", color: "text.secondary" }}>
-                        <StatusDot tone={doc.processed ? "retrieve" : "warning"} size={6} />
-                        {doc.processed ? "Indexed" : "Not indexed"} · {formatRelative(doc.created_at)}
+                        <StatusDot tone={STATE_TONE[docState(doc)]} size={6} />
+                        {STATE_LABEL[docState(doc)]} · {formatRelative(doc.created_at)}
                       </Typography>
                     </Box>
                   </Box>
@@ -499,8 +616,12 @@ export default function Documents() {
                   </Typography>
 
                   <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 0.9 }}>
-                    <StatusDot tone={doc.processed ? "retrieve" : "warning"} size={7} />
-                    <Typography sx={{ fontSize: "0.8125rem" }}>{doc.processed ? "Indexed" : "Not indexed"}</Typography>
+                    <StatusDot tone={STATE_TONE[docState(doc)]} size={7} />
+                    <Tooltip title={docState(doc) === "failed" ? doc.error_message ?? "" : ""}>
+                      <Typography sx={{ fontSize: "0.8125rem", color: docState(doc) === "failed" ? "error.main" : undefined }}>
+                        {STATE_LABEL[docState(doc)]}
+                      </Typography>
+                    </Tooltip>
                   </Box>
 
                   <Tooltip title={formatDate(doc.created_at)} placement="top-start">
@@ -520,13 +641,28 @@ export default function Documents() {
                       transition: "opacity 150ms ease",
                     }}
                   >
-                    <Tooltip title={doc.processed ? "Ask about this document" : "Not indexed yet"}>
+                    <Tooltip title={isReady(doc) ? "Ask about this document" : "Not indexed yet"}>
                       <span>
-                        <IconButton size="small" disabled={!doc.processed} onClick={() => askAbout(doc)} aria-label={`Ask about ${doc.filename}`}>
+                        <IconButton size="small" disabled={!isReady(doc)} onClick={() => askAbout(doc)} aria-label={`Ask about ${doc.filename}`}>
                           <ForumOutlinedIcon sx={{ fontSize: 17 }} />
                         </IconButton>
                       </span>
                     </Tooltip>
+                    {isReady(doc) && (
+                      <Tooltip title="Summarise">
+                        <IconButton size="small" onClick={() => void summarise(doc)} aria-label={`Summarise ${doc.filename}`}>
+                          <SummarizeOutlinedIcon sx={{ fontSize: 17 }} />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                    {docState(doc) === "failed" && canUpload && (
+                      <Tooltip title={`Retry indexing${doc.error_message ? ` — ${doc.error_message}` : ""}`}>
+                        <IconButton size="small" onClick={() => void retry(doc)} aria-label={`Retry ${doc.filename}`}
+                                    sx={{ color: "warning.main" }}>
+                          <ReplayRoundedIcon sx={{ fontSize: 17 }} />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     <Tooltip title="Details">
                       <IconButton size="small" onClick={() => openDetails(doc)} aria-label={`Details for ${doc.filename}`}>
                         <VisibilityOutlinedIcon sx={{ fontSize: 17 }} />
@@ -565,6 +701,28 @@ export default function Documents() {
           </Box>
         )}
       </Box>
+
+      <Dialog open={summaryFor !== null} onClose={() => setSummaryFor(null)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 600, fontSize: "1.0625rem" }}>Summary · {summaryFor}</DialogTitle>
+        <DialogContent>
+          {summary === null ? (
+            <Box sx={{ py: 4, display: "flex", alignItems: "center", gap: 2, justifyContent: "center" }}>
+              <CircularProgress size={20} />
+              <Typography color="text.secondary">The local AI is reading the document…</Typography>
+            </Box>
+          ) : (
+            <>
+              <Typography sx={{ whiteSpace: "pre-wrap", lineHeight: 1.7, fontSize: "0.9rem" }}>{summary.summary}</Typography>
+              <Typography sx={{ display: "block", mt: 2, fontSize: "0.75rem", color: "text.secondary" }}>
+                Based on {summary.covered} ({summary.characters_used.toLocaleString()} characters).
+              </Typography>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSummaryFor(null)}>Close</Button>
+        </DialogActions>
+      </Dialog>
 
       <DocumentDrawer
         document={drawerDoc}

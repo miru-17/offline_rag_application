@@ -1,11 +1,31 @@
 import apiClient from "./axios";
 
+export type DocumentStatus = "queued" | "processing" | "ready" | "failed";
+export type Visibility = "PRIVATE" | "TENANT" | "GROUP";
+
 export interface DocumentItem {
   id: string;
   filename: string;
   file_type?: string;
   processed: boolean;
+  status?: DocumentStatus;
+  error_message?: string | null;
+  visibility?: Visibility;
+  group_id?: string | null;
+  group_name?: string | null;
+  chunk_count?: number;
+  page_count?: number | null;
+  file_size?: number | null;
+  pii_summary?: { mode: string; counts: Record<string, number>; total: number } | null;
+  owner?: string | null;
   created_at?: string;
+  processed_at?: string | null;
+}
+
+/** Shape returned by GET /documents/{id}. */
+export interface DocumentDetails extends DocumentItem {
+  uploaded_at?: string;
+  tenant_id?: string;
 }
 
 export interface DocumentListResponse {
@@ -14,71 +34,97 @@ export interface DocumentListResponse {
 }
 
 export const getDocuments = async (): Promise<DocumentItem[]> => {
-  const response = await apiClient.get<
-    DocumentItem[] | DocumentListResponse
-  >("/documents/");
-
-  if (Array.isArray(response.data)) {
-    return response.data;
-  }
-
-  return response.data.documents;
+  const response = await apiClient.get<DocumentItem[]>("/documents/");
+  return response.data;
 };
+
+export interface UploadOptions {
+  visibility?: Visibility;
+  groupId?: string;
+  allowDuplicate?: boolean;
+}
 
 export const uploadDocument = async (
   file: File,
   onUploadProgress?: (percent: number) => void,
+  options: UploadOptions = {},
 ): Promise<DocumentItem> => {
   const formData = new FormData();
-
   formData.append("file", file);
+  if (options.visibility) formData.append("visibility", options.visibility);
+  if (options.groupId) formData.append("group_id", options.groupId);
+  if (options.allowDuplicate) formData.append("allow_duplicate", "true");
 
-  const response = await apiClient.post<DocumentItem>(
-    "/documents/upload",
-    formData,
-    {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-      onUploadProgress: (event) => {
-        if (onUploadProgress && event.total) {
-          onUploadProgress(
-            Math.round((event.loaded / event.total) * 100),
-          );
-        }
-      },
+  const response = await apiClient.post<DocumentItem>("/documents/upload", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+    onUploadProgress: (event) => {
+      if (onUploadProgress && event.total) onUploadProgress(Math.round((event.loaded / event.total) * 100));
     },
-  );
-
+  });
   return response.data;
 };
 
-export const deleteDocument = async (
-  documentId: string,
-): Promise<void> => {
-  await apiClient.delete(
-    `/documents/${documentId}`,
-  );
+export const retryDocument = async (documentId: string): Promise<DocumentItem> => {
+  const response = await apiClient.post<DocumentItem>(`/documents/${documentId}/retry`);
+  return response.data;
 };
 
-/** Shape returned by GET /documents/{id}. */
-export interface DocumentDetails {
-  id: string;
-  tenant_id: string;
+export const deleteDocument = async (documentId: string): Promise<void> => {
+  await apiClient.delete(`/documents/${documentId}`);
+};
+
+export const getDocument = async (documentId: string): Promise<DocumentDetails> => {
+  const response = await apiClient.get<DocumentDetails>(`/documents/${documentId}`);
+  return response.data;
+};
+
+export interface SummaryResult {
+  document_id: string;
   filename: string;
-  file_type: string;
-  visibility?: "TENANT" | "PRIVATE" | string;
-  processed: boolean;
-  uploaded_at?: string;
+  summary: string;
+  covered: string;
+  characters_used: number;
 }
 
-export const getDocument = async (
-  documentId: string,
-): Promise<DocumentDetails> => {
-  const response =
-    await apiClient.get<DocumentDetails>(
-      `/documents/${documentId}`,
-    );
-
+export const summarizeDocument = async (documentId: string): Promise<SummaryResult> => {
+  const response = await apiClient.post<SummaryResult>(`/documents/${documentId}/summary`, null, { timeout: 300000 });
   return response.data;
+};
+
+export interface CompareChange {
+  type: "added" | "removed" | "changed";
+  before: string | null;
+  after: string | null;
+}
+
+export interface CompareResult {
+  document_a: { id: string; filename: string };
+  document_b: { id: string; filename: string };
+  similarity: number;
+  counts: { added: number; removed: number; changed: number };
+  changes: CompareChange[];
+  truncated: boolean;
+  summary: string | null;
+}
+
+export const compareDocuments = async (a: string, b: string, summarize: boolean): Promise<CompareResult> => {
+  const response = await apiClient.post<CompareResult>(
+    "/documents/compare",
+    { document_a: a, document_b: b, summarize },
+    { timeout: 300000 },
+  );
+  return response.data;
+};
+
+/** Turns FastAPI error payloads (string, object or validation list) into one sentence. */
+export const errorMessage = (error: unknown, fallback = "Something went wrong."): string => {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object" && "message" in (detail as object)) {
+    return String((detail as { message: unknown }).message);
+  }
+  if (Array.isArray(detail) && detail.length > 0) {
+    return detail.map((d) => (d as { msg?: string }).msg ?? "").filter(Boolean).join(" ");
+  }
+  return fallback;
 };

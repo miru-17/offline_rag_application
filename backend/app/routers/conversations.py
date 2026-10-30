@@ -8,8 +8,10 @@ from app.database.connection import get_db
 from app.dependencies.auth import get_current_user
 from app.models.conversation import Conversation
 from app.models.user import User
+from app.models.message import Message
 from app.schemas.conversation import (
     ConversationCreate,
+    FeedbackRequest,
     ConversationDetailResponse,
     ConversationResponse,
 )
@@ -118,3 +120,31 @@ def delete_conversation(
     db.commit()
 
     return None
+
+
+@router.post("/messages/{message_id}/feedback")
+def message_feedback(
+    message_id: uuid.UUID,
+    payload: FeedbackRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Thumbs up / down on an answer, only by the conversation owner."""
+
+    message = db.scalar(
+        select(Message)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(
+            Message.id == message_id,
+            Message.role == "assistant",
+            Conversation.user_id == current_user.id,
+            Conversation.tenant_id == current_user.tenant_id,
+        )
+    )
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    message.feedback_rating = payload.rating
+    message.feedback_reason = (payload.reason or "").strip() or None
+    db.commit()
+    return {"message_id": str(message.id), "rating": message.feedback_rating}

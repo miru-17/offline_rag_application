@@ -64,3 +64,13 @@ export const getCurrentUser = async (): Promise<CurrentUser> => {
 
   return response.data;
 };
+
+export interface SetupStatus {
+  needs_setup: boolean;
+  self_registration: boolean;
+}
+
+export const getSetupStatus = async (): Promise<SetupStatus> => {
+  const response = await apiClient.get<SetupStatus>("/auth/setup-status");
+  return response.data;
+};

@@ -29,10 +29,14 @@ def get_tokenizer():
     during the application lifetime.
     """
 
-    return AutoTokenizer.from_pretrained(
-        TOKENIZER_NAME,
-        local_files_only=True,
-    )
+    try:
+        return AutoTokenizer.from_pretrained(
+            TOKENIZER_NAME,
+            local_files_only=True,
+        )
+    except Exception:
+        # First-time setup: download once, then it is cached offline.
+        return AutoTokenizer.from_pretrained(TOKENIZER_NAME)
 
 
 # --------------------------------------------------

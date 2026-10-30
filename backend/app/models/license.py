@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.connection import Base
@@ -43,6 +43,35 @@ class License(Base):
         Boolean,
         nullable=False,
         default=True,
+    )
+
+    # The complete signed licence file. Validity is always decided from
+    # this signed content, never from the editable columns above.
+    signed_license: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    customer: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    max_users: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    features: Mapped[list | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    # Highest clock time seen, used to detect the system clock being
+    # turned back to extend an expired licence.
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
     )
 
     tenant = relationship(

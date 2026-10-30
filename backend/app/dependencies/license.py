@@ -7,47 +7,50 @@ from app.models.user import User
 from app.services.license_service import LicenseService
 
 
+def _check(db: Session, user: User, feature: str | None = None) -> None:
+    state = LicenseService.evaluate(db, user.tenant_id)
+
+    if not state.usable:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"A valid license is required. {state.message}",
+        )
+
+    if feature and not state.has_feature(feature):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Your license does not include the '{feature}' feature.",
+        )
+
+
 def require_valid_license(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> User:
-    """
-    Require the current user's tenant to have a valid license.
-    """
-
-    if not LicenseService.is_license_valid(
-        db=db,
-        tenant_id=current_user.tenant_id,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="A valid license is required to access this resource.",
-        )
-
+    """Any role, tenant licence must be valid (or in its grace period)."""
+    _check(db, current_user)
     return current_user
 
 
 def require_valid_license_for_editors(
-    current_user: User = Depends(
-        require_roles("ADMIN", "USER")
-    ),
+    current_user: User = Depends(require_roles("ADMIN", "USER")),
     db: Session = Depends(get_db),
 ) -> User:
-    """
-    Require:
-        1. User must be ADMIN or USER
-        2. Tenant must have a valid license
-
-    VIEWER users are rejected before reaching the license check.
-    """
-
-    if not LicenseService.is_license_valid(
-        db=db,
-        tenant_id=current_user.tenant_id,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="A valid license is required to upload documents.",
-        )
-
+    """ADMIN or USER, with a valid licence. VIEWER is rejected first."""
+    _check(db, current_user)
     return current_user
+
+
+def require_feature(feature: str, *roles: str):
+    """Valid licence that includes `feature`; optionally limited to roles."""
+
+    role_dependency = require_roles(*roles) if roles else get_current_user
+
+    def checker(
+        current_user: User = Depends(role_dependency),
+        db: Session = Depends(get_db),
+    ) -> User:
+        _check(db, current_user, feature)
+        return current_user
+
+    return checker

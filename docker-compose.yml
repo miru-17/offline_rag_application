@@ -1,3 +1,6 @@
+# RAGENTIS -- single-machine deployment.
+# Secrets come from the .env file next to this file (never commit it).
+# Copy .env.example to .env and fill in the values first.
 services:
   postgres:
     image: postgres:16
@@ -6,7 +9,7 @@ services:
     environment:
       POSTGRES_DB: offline_rag
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - copy .env.example to .env}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -14,8 +17,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # Only reachable from this computer (not from the office network).
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
   ollama:
     image: ollama/ollama:latest
@@ -24,9 +28,10 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
 
   backend:
+    build: ./backend
     image: ragentis-backend:latest
     container_name: ragentis-backend
     restart: unless-stopped
@@ -40,19 +45,28 @@ services:
       # instead of being embedded in the URL, so special characters such
       # as '@' in the password do not need URL-encoding.
       DATABASE_URL: "postgresql+psycopg2://postgres@postgres:5432/offline_rag"
-      PGPASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - copy .env.example to .env}"
-      JWT_SECRET_KEY: "${JWT_SECRET_KEY:?JWT_SECRET_KEY is not set - copy .env.example to .env}"
+      PGPASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env (at least 32 characters)}"
       OLLAMA_URL: "http://ollama:11434/api/generate"
-      OLLAMA_TAGS_URL: "http://ollama:11434/api/tags"
-      OLLAMA_MODEL: "llama3.2:3b"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3.2:3b}"
+      ALLOW_SELF_REGISTRATION: "${ALLOW_SELF_REGISTRATION:-false}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}"
+      ENABLE_API_DOCS: "${ENABLE_API_DOCS:-false}"
+      LLM_MAX_CONCURRENCY: "1"
+      INGESTION_CONCURRENCY: "1"
     volumes:
       - rag_uploads:/app/uploads
       - rag_chroma:/app/chroma_db
+      # Keeps the downloaded embedding model, so it is fetched only once.
+      - hf_cache:/hf_cache
+    # Use 0.0.0.0:8000:8000 only when other office computers must connect,
+    # and then put HTTPS (reverse proxy) in front of it.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
 volumes:
   postgres_data:
   ollama_data:
   rag_uploads:
   rag_chroma:
+  hf_cache:

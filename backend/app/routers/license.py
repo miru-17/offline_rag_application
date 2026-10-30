@@ -1,167 +1,66 @@
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
-from app.dependencies.auth import get_current_user, require_roles
+from app.dependencies.auth import get_current_user, is_admin, require_roles
 from app.models.user import User
-from app.services.license_service import LicenseService
+from app.services import audit_service
+from app.services.license_service import LicenseError, LicenseService
+
+router = APIRouter(prefix="/license", tags=["License"])
 
 
-router = APIRouter(
-    prefix="/license",
-    tags=["License"],
-)
-
-
-class LicenseCreateRequest(BaseModel):
-    expires_at: datetime
-
-class LicenseExtensionRequest(BaseModel):
-    days: int | None = None
-    expires_at: datetime | None = None
-
-
-@router.post(
-    "/create",
-    status_code=status.HTTP_201_CREATED,
-)
-def create_license(
-    license_data: LicenseCreateRequest,
-    current_user: User = Depends(
-        require_roles("ADMIN")
-    ),
-    db: Session = Depends(get_db),
-):
-    # Normalize the incoming expiry datetime to UTC
-    expires_at = license_data.expires_at
-
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(
-            tzinfo=timezone.utc
-        )
-
-    expires_at = expires_at.astimezone(timezone.utc)
-
-    print(
-        "RECEIVED EXPIRY:",
-        license_data.expires_at,
-    )
-    print(
-        "NORMALIZED EXPIRY:",
-        expires_at,
-    )
-    print(
-        "CURRENT UTC:",
-        datetime.now(timezone.utc),
-    )
-
-    # Prevent creation of an already-expired license
-    if expires_at <= datetime.now(timezone.utc):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="License expiry must be in the future.",
-        )
-
-    # Check whether this tenant already has a license
-    existing_license = LicenseService.get_license(
-        db=db,
-        tenant_id=current_user.tenant_id,
-    )
-
-    if existing_license:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A license already exists for this tenant.",
-        )
-
-    # Create the license
-    license = LicenseService.create_license(
-        db=db,
-        tenant_id=current_user.tenant_id,
-        expires_at=expires_at,
-    )
-
-    return {
-        "message": "License created successfully",
-        "license": {
-            "id": str(license.id),
-            "license_key": license.license_key,
-            "tenant_id": str(license.tenant_id),
-            "issued_at": license.issued_at,
-            "expires_at": license.expires_at,
-            "is_active": license.is_active,
-        },
-    }
+class LicenseInstallRequest(BaseModel):
+    license_text: str = Field(min_length=20, max_length=20000)
 
 
 @router.get("/status")
-def license_status(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    # Get the license for the current user's tenant
-    license = LicenseService.get_license(
-        db=db,
-        tenant_id=current_user.tenant_id,
-    )
+def license_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    state = LicenseService.evaluate(db, current_user.tenant_id)
 
-    # No license exists
-    if license is None:
-        return {
-            "licensed": False,
-            "message": "No license found for this tenant.",
-        }
-
-    # Check whether the license is currently valid
-    valid = LicenseService.is_license_valid(
-        db=db,
-        tenant_id=current_user.tenant_id,
-    )
-
-    return {
-        "licensed": valid,
-        "license": {
-            "license_key": license.license_key,
-            "issued_at": license.issued_at,
-            "expires_at": license.expires_at,
-            "is_active": license.is_active,
-        },
+    response = {
+        "licensed": state.usable,
+        "state": state.state,
+        "message": state.message,
+        "days_left": state.days_left,
     }
 
+    if state.payload:
+        payload = state.payload
+        response["license"] = {
+            "license_key": payload.get("license_id"),
+            "expires_at": payload["_expires_at"],
+            "issued_at": payload.get("issued_at"),
+            "is_active": state.usable,
+        }
+        if is_admin(current_user):
+            response["license"].update({
+                "customer": payload.get("customer"),
+                "max_users": payload.get("max_users"),
+                "features": payload.get("features"),
+                "grace_days": payload.get("grace_days"),
+            })
+    return response
 
-@router.patch("/extend")
-def extend_license(
-    license_data: LicenseExtensionRequest,
-    current_user: User = Depends(
-        require_roles("ADMIN")
-    ),
+
+@router.post("/install")
+def install_license(
+    request: Request,
+    payload: LicenseInstallRequest,
+    current_user: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
+    """Install the signed .license file issued by the vendor."""
     try:
-        license = LicenseService.extend_license(
-            db=db,
-            tenant_id=current_user.tenant_id,
-            days=license_data.days,
-            expires_at=license_data.expires_at,
-        )
+        license = LicenseService.install(db, current_user.tenant_id, payload.license_text)
+    except LicenseError as exc:
+        audit_service.record("license.install", actor=current_user, outcome="failure",
+                             details={"reason": str(exc)}, request=request)
+        raise HTTPException(status_code=400, detail=str(exc))
 
-        return {
-            "message": "License updated successfully",
-            "license": {
-                "license_key": license.license_key,
-                "tenant_id": str(license.tenant_id),
-                "issued_at": license.issued_at,
-                "expires_at": license.expires_at,
-                "is_active": license.is_active,
-            },
-        }
-
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        )
-    
+    audit_service.record("license.install", actor=current_user, target_type="license",
+                         target_id=license.license_key, target_label=license.customer,
+                         details={"expires_at": license.expires_at.isoformat(), "max_users": license.max_users},
+                         request=request)
+    return {"message": "Licence installed", **license_status(current_user, db)}

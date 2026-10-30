@@ -11,6 +11,9 @@ export interface ConversationMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  sources?: import("./query.api").QuerySource[] | null;
+  answer_status?: import("./query.api").AnswerStatus | null;
+  feedback_rating?: "up" | "down" | null;
   created_at: string;
 }
 

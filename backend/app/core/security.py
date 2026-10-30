@@ -1,28 +1,25 @@
 from datetime import datetime, timedelta, timezone
-import os
 
 import bcrypt
-from dotenv import load_dotenv
-from jose import jwt
+import jwt
 
-load_dotenv()
+from app.core.config import ACCESS_TOKEN_EXPIRE_MINUTES, get_jwt_secret
 
-SECRET_KEY = os.getenv(
-    "JWT_SECRET_KEY",
-    "development-secret-change-this"
-)
+# Fails at import (= at startup) when the secret is missing or weak.
+SECRET_KEY = get_jwt_secret()
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+
+class TokenError(Exception):
+    """Raised when a JWT cannot be validated."""
 
 
 def hash_password(password: str) -> str:
     password_bytes = password.encode("utf-8")
 
     if len(password_bytes) > 72:
-        raise ValueError(
-            "Password must not exceed 72 bytes"
-        )
+        raise ValueError("Password must not exceed 72 bytes")
 
     hashed = bcrypt.hashpw(
         password_bytes,
@@ -41,30 +38,43 @@ def verify_password(
     if len(password_bytes) > 72:
         return False
 
-    return bcrypt.checkpw(
-        password_bytes,
-        hashed_password.encode("utf-8"),
-    )
+    try:
+        return bcrypt.checkpw(
+            password_bytes,
+            hashed_password.encode("utf-8"),
+        )
+    except ValueError:
+        return False
+
+
+# A real bcrypt hash used to keep login timing the same when the
+# username does not exist (prevents username discovery by timing).
+_DUMMY_HASH = bcrypt.hashpw(b"timing-equaliser", bcrypt.gensalt(rounds=12)).decode()
+
+
+def burn_password_check(plain_password: str) -> None:
+    verify_password(plain_password[:72], _DUMMY_HASH)
 
 
 def create_access_token(
     data: dict,
     expires_delta: timedelta | None = None,
 ) -> str:
-
     to_encode = data.copy()
+    now = datetime.now(timezone.utc)
+    expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire, "iat": now})
 
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_access_token(token: str) -> dict:
+    try:
+        return jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"require": ["exp", "sub"]},
         )
-
-    to_encode.update({"exp": expire})
-
-    return jwt.encode(
-        to_encode,
-        SECRET_KEY,
-        algorithm=ALGORITHM,
-    )
+    except jwt.PyJWTError as exc:
+        raise TokenError(str(exc)) from exc

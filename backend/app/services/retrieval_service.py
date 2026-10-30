@@ -1,367 +1,87 @@
+"""
+Retrieval for the RAG pipeline.
+
+1. If the question names one of the user's accessible documents (by filename
+   words), search only that document with a relaxed threshold (0.85).
+2. Otherwise search all accessible documents (private + tenant shared +
+   the user's team spaces) with the normal threshold (0.75).
+3. Drop chunks whose cosine distance is above the threshold.
+4. Remove duplicate chunks and keep the best top_k.
+"""
+
+from __future__ import annotations
+
 import re
 
+from app.core.logging import get_logger
 from app.services.embedding_service import EmbeddingService
 from app.services.vector_store import VectorStore
 
+logger = get_logger("retrieval")
+
+EMPTY = {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+
 
 class RetrievalService:
-    """
-    Handles document retrieval for the RAG pipeline.
-
-    Retrieval strategy:
-
-    1. Identify whether the user is referring to a
-       specific accessible document.
-    2. If a document is identified, search only inside
-       that document.
-    3. Otherwise, perform semantic retrieval across
-       all documents accessible to the current user:
-          - User's PRIVATE documents
-          - Tenant's TENANT/shared documents
-    4. Apply similarity filtering.
-    5. Remove duplicate chunks.
-    """
-
-    # Chroma cosine distance:
-    # lower distance = better match.
 
     NORMAL_THRESHOLD = 0.75
-
     DOCUMENT_THRESHOLD = 0.85
-
     CANDIDATE_MULTIPLIER = 3
 
     STOP_WORDS = {
-        "what",
-        "which",
-        "who",
-        "where",
-        "when",
-        "why",
-        "how",
-        "is",
-        "are",
-        "was",
-        "were",
-        "the",
-        "a",
-        "an",
-        "and",
-        "or",
-        "of",
-        "in",
-        "on",
-        "to",
-        "from",
-        "for",
-        "does",
-        "do",
-        "did",
-        "tell",
-        "me",
-        "about",
-        "show",
-        "give",
-        "please",
-        "my",
-        "your",
-        "their",
-        "this",
-        "that",
-        "these",
-        "those",
-        "can",
-        "could",
-        "would",
-        "should",
-        "be",
-        "it",
-        "its",
+        "what", "which", "who", "where", "when", "why", "how", "is", "are", "was", "were",
+        "the", "a", "an", "and", "or", "of", "in", "on", "to", "from", "for", "does", "do",
+        "did", "tell", "me", "about", "show", "give", "please", "my", "your", "their", "this",
+        "that", "these", "those", "can", "could", "would", "should", "be", "it", "its",
     }
 
     IMPORTANT_DOCUMENT_WORDS = {
-        "resume",
-        "cv",
-        "report",
-        "handout",
-        "notes",
-        "assignment",
-        "project",
-        "document",
-        "thesis",
-        "paper",
-        "agreement",
+        "resume", "cv", "report", "handout", "notes", "assignment", "project",
+        "document", "thesis", "paper", "agreement", "policy", "invoice", "contract",
     }
 
     def __init__(self):
         self.embedding_service = EmbeddingService()
         self.vector_store = VectorStore()
 
-    # ---------------------------------------------------------
-    # TEXT NORMALIZATION
-    # ---------------------------------------------------------
-
-    def _normalize_tokens(
-        self,
-        text: str,
-    ) -> set[str]:
-
+    def _normalize_tokens(self, text: str) -> set[str]:
         if not text:
             return set()
+        text = re.sub(r"\.(pdf|docx|xlsx|csv)\b", " ", text.lower())
+        text = re.sub(r"[^a-z0-9]+", " ", text)
+        return {t for t in text.split() if t not in self.STOP_WORDS and len(t) > 2}
 
-        text = text.lower()
-
-        text = re.sub(
-            r"\.(pdf|docx|xlsx)\b",
-            " ",
-            text,
-        )
-
-        text = re.sub(
-            r"[^a-z0-9]+",
-            " ",
-            text,
-        )
-
-        tokens = set()
-
-        for token in text.split():
-
-            if not token:
-                continue
-
-            if token in self.STOP_WORDS:
-                continue
-
-            if len(token) <= 2:
-                continue
-
-            tokens.add(token)
-
-        return tokens
-
-    # ---------------------------------------------------------
-    # DOCUMENT MATCHING
-    # ---------------------------------------------------------
-
-    def _find_document_match(
-        self,
-        query: str,
-        documents: list[dict],
-    ):
-        """
-        Detect whether the query refers to a particular
-        accessible uploaded document based on filename tokens.
-
-        Documents passed here already represent the user's
-        authorized scope:
-
-            1. User's PRIVATE documents
-            2. Tenant's TENANT/shared documents
-        """
-
+    def _find_document_match(self, query: str, documents: list[dict]):
         query_tokens = self._normalize_tokens(query)
-
-        print("\n=== DOCUMENT MATCHING DEBUG ===")
-        print(f"Query          : {query}")
-        print(f"Query tokens   : {sorted(query_tokens)}")
-
         if not query_tokens:
-            print("No query tokens — skipping document match.")
-            print("================================\n")
             return None
 
-        best_document = None
-        best_score = 0
-
+        best_document, best_score = None, 0
         for document in documents:
-
-            filename = document.get(
-                "filename",
-                "",
-            )
-
-            filename_tokens = self._normalize_tokens(
-                filename
-            )
-
-            if not filename_tokens:
-                continue
-
-            overlap = query_tokens.intersection(
-                filename_tokens
-            )
-
+            overlap = query_tokens & self._normalize_tokens(document.get("filename", ""))
             if not overlap:
                 continue
-
-            score = len(overlap)
-
-            important_overlap = overlap.intersection(
-                self.IMPORTANT_DOCUMENT_WORDS
-            )
-
-            score += len(important_overlap) * 2
-
-            print(
-                f"\n  [CANDIDATE] {filename}"
-            )
-
-            print(
-                f"  filename tokens: {sorted(filename_tokens)}"
-            )
-
-            print(
-                f"  overlap        : {sorted(overlap)}"
-            )
-
-            print(
-                f"  score          : {score}"
-            )
-
+            score = len(overlap) + 2 * len(overlap & self.IMPORTANT_DOCUMENT_WORDS)
             if score > best_score:
-                best_score = score
-                best_document = document
-
-        if best_document:
-            print(
-                f"\n  => MATCHED: "
-                f"{best_document.get('filename')} "
-                f"(score={best_score})"
-            )
-        else:
-            print(
-                "\n  => NO MATCH: "
-                "no filename tokens overlap with query."
-            )
-
-        print("================================\n")
-
+                best_score, best_document = score, document
         return best_document
 
-    # ---------------------------------------------------------
-    # RESULT DEDUPLICATION
-    # ---------------------------------------------------------
-
-    def _deduplicate_results(
-        self,
-        ids,
-        documents,
-        metadatas,
-        distances,
-        top_k,
-    ):
-        """
-        Removes duplicate chunks.
-
-        Duplicate protection uses:
-
-            document_id + chunk_index
-
-        and additionally:
-
-            filename + chunk_index
-        """
-
-        seen_document_chunks = set()
-        seen_filename_chunks = set()
-
-        selected = []
-
-        for index, distance in enumerate(
-            distances
-        ):
-
-            metadata = (
-                metadatas[index]
-                if index < len(metadatas)
-                else {}
-            )
-
-            document_id = metadata.get(
-                "document_id",
-                "",
-            )
-
-            filename = metadata.get(
-                "filename",
-                "",
-            )
-
-            chunk_index = metadata.get(
-                "chunk_index",
-                index,
-            )
-
-            document_key = (
-                document_id,
-                chunk_index,
-            )
-
-            filename_key = (
-                filename.lower().strip(),
-                chunk_index,
-            )
-
-            if document_key in seen_document_chunks:
-                print(
-                    f"  [DEDUP] Skipping duplicate "
-                    f"document_id={document_id}, "
-                    f"chunk={chunk_index}"
-                )
+    @staticmethod
+    def _deduplicate(items: list[dict], top_k: int) -> list[dict]:
+        seen_doc, seen_name, selected = set(), set(), []
+        for item in items:
+            metadata = item["metadata"] or {}
+            chunk_index = metadata.get("chunk_index")
+            doc_key = (metadata.get("document_id", ""), chunk_index)
+            name_key = (str(metadata.get("filename", "")).lower().strip(), chunk_index)
+            if doc_key in seen_doc or name_key in seen_name:
                 continue
-
-            if filename_key in seen_filename_chunks:
-                print(
-                    f"  [DEDUP] Skipping duplicate "
-                    f"filename={filename}, "
-                    f"chunk={chunk_index}"
-                )
-                continue
-
-            seen_document_chunks.add(
-                document_key
-            )
-
-            seen_filename_chunks.add(
-                filename_key
-            )
-
-            selected.append(index)
-
+            seen_doc.add(doc_key)
+            seen_name.add(name_key)
+            selected.append(item)
             if len(selected) >= top_k:
                 break
-
-        return {
-            "ids": [
-                [
-                    ids[index]
-                    for index in selected
-                ]
-            ],
-            "documents": [
-                [
-                    documents[index]
-                    for index in selected
-                ]
-            ],
-            "metadatas": [
-                [
-                    metadatas[index]
-                    for index in selected
-                ]
-            ],
-            "distances": [
-                [
-                    distances[index]
-                    for index in selected
-                ]
-            ],
-        }
-
-    # ---------------------------------------------------------
-    # MAIN RETRIEVAL
-    # ---------------------------------------------------------
+        return selected
 
     def retrieve(
         self,
@@ -369,431 +89,67 @@ class RetrievalService:
         user_id: str,
         tenant_id: str,
         top_k: int = 5,
+        group_ids: list[str] | None = None,
+        document_id: str | None = None,
     ):
         if not query or not query.strip():
-            raise ValueError(
-                "Query cannot be empty."
-            )
-
-        if not user_id:
-            raise ValueError(
-                "User ID is required."
-            )
-
-        if not tenant_id:
-            raise ValueError(
-                "Tenant ID is required."
-            )
-
+            raise ValueError("Query cannot be empty.")
+        if not user_id or not tenant_id:
+            raise ValueError("User and tenant are required.")
         if top_k < 1:
-            raise ValueError(
-                "top_k must be at least 1."
-            )
+            raise ValueError("top_k must be at least 1.")
 
-        # -----------------------------------------------------
-        # STEP 1 — Authenticated user context
-        # -----------------------------------------------------
+        query_embedding = self.embedding_service.generate_embedding(query)
 
-        print("\n=== RETRIEVAL CONTEXT ===")
-        print(f"Authenticated user_id  : {user_id}")
-        print(f"Authenticated tenant_id: {tenant_id}")
-        print(f"Query                  : {query}")
-        print("=========================\n")
+        matched = None
+        if document_id is None:
+            accessible = self.vector_store.get_user_documents(user_id, tenant_id, group_ids)
+            matched = self._find_document_match(query, accessible)
+            if matched:
+                document_id = matched["document_id"]
 
-        # -----------------------------------------------------
-        # STEP 2 — Generate query embedding
-        # -----------------------------------------------------
+        threshold = self.DOCUMENT_THRESHOLD if document_id else self.NORMAL_THRESHOLD
+        candidate_count = max(top_k * self.CANDIDATE_MULTIPLIER, 15)
 
-        query_embedding = (
-            self.embedding_service
-            .generate_embedding(query)
+        results = self.vector_store.search(
+            query_embedding=query_embedding,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            top_k=candidate_count,
+            document_id=document_id,
+            group_ids=group_ids,
         )
 
-        # -----------------------------------------------------
-        # STEP 3 — Get ALL ACCESSIBLE documents
-        #
-        # This now includes:
-        #
-        #   PRIVATE:
-        #       Current user's own documents
-        #
-        #   TENANT:
-        #       Shared documents uploaded by tenant ADMIN
-        #
-        # It does NOT include:
-        #
-        #   Other users' PRIVATE documents
-        #   Other tenants' documents
-        # -----------------------------------------------------
-
-        accessible_documents = (
-            self.vector_store
-            .get_user_documents(
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
-        )
-
-        print(
-            "\n=== AVAILABLE ACCESSIBLE DOCUMENTS ==="
-        )
-
-        if not accessible_documents:
-
-            print(
-                "No accessible documents found "
-                f"(user_id={user_id}, "
-                f"tenant_id={tenant_id})."
-            )
-
-        else:
-
-            for document in accessible_documents:
-
-                print(
-                    f"- "
-                    f"{document.get('filename')} "
-                    f"| "
-                    f"{document.get('document_id')} "
-                    f"| "
-                    f"visibility="
-                    f"{document.get('visibility')}"
-                )
-
-        print(
-            "=======================================\n"
-        )
-
-        # -----------------------------------------------------
-        # STEP 4 — Detect document mentioned in query
-        # -----------------------------------------------------
-
-        matched_document = (
-            self._find_document_match(
-                query=query,
-                documents=accessible_documents,
-            )
-        )
-
-        # -----------------------------------------------------
-        # STEP 5 — Candidate count
-        # -----------------------------------------------------
-
-        candidate_count = max(
-            top_k * self.CANDIDATE_MULTIPLIER,
-            15,
-        )
-
-        # -----------------------------------------------------
-        # STEP 6 — Document-aware retrieval
-        # -----------------------------------------------------
-
-        if matched_document:
-
-            document_id = (
-                matched_document[
-                    "document_id"
-                ]
-            )
-
-            filename = (
-                matched_document.get(
-                    "filename",
-                    "",
-                )
-            )
-
-            visibility = (
-                matched_document.get(
-                    "visibility",
-                    "",
-                )
-            )
-
-            print(
-                "\n=== DOCUMENT ROUTING ==="
-            )
-
-            print(
-                f"Query           : {query}"
-            )
-
-            print(
-                f"Matched document: {filename}"
-            )
-
-            print(
-                f"Document ID     : {document_id}"
-            )
-
-            print(
-                f"Visibility      : {visibility}"
-            )
-
-            print(
-                "Retrieval scope : THIS DOCUMENT ONLY"
-            )
-
-            print(
-                f"Distance threshold: "
-                f"{self.DOCUMENT_THRESHOLD} "
-                f"(relaxed for document-specific query)"
-            )
-
-            print(
-                "=========================\n"
-            )
-
-            results = (
-                self.vector_store.search(
-                    query_embedding=query_embedding,
-                    user_id=user_id,
-                    tenant_id=tenant_id,
-                    top_k=candidate_count,
-                    document_id=document_id,
-                )
-            )
-
-        # -----------------------------------------------------
-        # STEP 7 — Normal semantic retrieval
-        # -----------------------------------------------------
-
-        else:
-
-            print(
-                "\n=== DOCUMENT ROUTING ==="
-            )
-
-            print(
-                f"Query           : {query}"
-            )
-
-            print(
-                "No specific document detected."
-            )
-
-            print(
-                "Using normal semantic retrieval."
-            )
-
-            print(
-                "Retrieval scope : ALL ACCESSIBLE DOCUMENTS"
-            )
-
-            print(
-                f"Distance threshold: "
-                f"{self.NORMAL_THRESHOLD}"
-            )
-
-            print(
-                "=========================\n"
-            )
-
-            results = (
-                self.vector_store.search(
-                    query_embedding=query_embedding,
-                    user_id=user_id,
-                    tenant_id=tenant_id,
-                    top_k=candidate_count,
-                )
-            )
-
-        # -----------------------------------------------------
-        # STEP 8 — Extract Chroma results
-        # -----------------------------------------------------
-
-        distances = (
-            results.get(
-                "distances",
-                [[]],
-            )[0]
-        )
-
-        metadatas = (
-            results.get(
-                "metadatas",
-                [[]],
-            )[0]
-        )
-
-        documents = (
-            results.get(
-                "documents",
-                [[]],
-            )[0]
-        )
-
-        ids = (
-            results.get(
-                "ids",
-                [[]],
-            )[0]
-        )
-
-        # -----------------------------------------------------
-        # STEP 9 — Debug retrieval
-        # -----------------------------------------------------
-
-        print(
-            "\n=== RETRIEVAL DISTANCES ==="
-        )
-
+        distances = results.get("distances", [[]])[0]
         if not distances:
-            print(
-                "No retrieval results."
-            )
+            return dict(EMPTY)
 
-        for index, distance in enumerate(
-            distances
-        ):
-
-            metadata = (
-                metadatas[index]
-                if index < len(metadatas)
-                else {}
-            )
-
-            print(
-                f"Chunk {index} | "
-                f"Distance: {distance:.4f} | "
-                f"File: "
-                f"{metadata.get('filename')} | "
-                f"Visibility: "
-                f"{metadata.get('visibility')} | "
-                f"Chunk Index: "
-                f"{metadata.get('chunk_index')}"
-            )
-
-        print(
-            "===========================\n"
-        )
-
-        # -----------------------------------------------------
-        # STEP 10 — No results
-        # -----------------------------------------------------
-
-        if not distances:
-
-            return {
-                "ids": [[]],
-                "documents": [[]],
-                "metadatas": [[]],
-                "distances": [[]],
+        items = [
+            {
+                "id": results["ids"][0][i],
+                "document": results["documents"][0][i],
+                "metadata": results["metadatas"][0][i],
+                "distance": distance,
             }
-
-        # -----------------------------------------------------
-        # STEP 11 — Similarity filtering
-        # -----------------------------------------------------
-
-        active_threshold = (
-            self.DOCUMENT_THRESHOLD
-            if matched_document
-            else self.NORMAL_THRESHOLD
-        )
-
-        valid_indices = [
-            index
-            for index, distance in enumerate(
-                distances
-            )
-            if distance <= active_threshold
+            for i, distance in enumerate(distances)
+            if distance <= threshold
         ]
+        items.sort(key=lambda item: item["distance"])
+        final = self._deduplicate(items, top_k)
 
-        valid_indices.sort(
-            key=lambda index:
-                distances[index]
+        logger.debug(
+            "Retrieval finished",
+            extra={"fields": {
+                "candidates": len(distances),
+                "kept": len(final),
+                "threshold": threshold,
+                "document_scoped": bool(document_id),
+            }},
         )
 
-        filtered_ids = [
-            ids[index]
-            for index in valid_indices
-        ]
-
-        filtered_documents = [
-            documents[index]
-            for index in valid_indices
-        ]
-
-        filtered_metadatas = [
-            metadatas[index]
-            for index in valid_indices
-        ]
-
-        filtered_distances = [
-            distances[index]
-            for index in valid_indices
-        ]
-
-        # -----------------------------------------------------
-        # STEP 12 — Deduplicate
-        # -----------------------------------------------------
-
-        print("\n=== DEDUPLICATION ===")
-
-        final_results = (
-            self._deduplicate_results(
-                ids=filtered_ids,
-                documents=filtered_documents,
-                metadatas=filtered_metadatas,
-                distances=filtered_distances,
-                top_k=top_k,
-            )
-        )
-
-        print("=====================\n")
-
-        # -----------------------------------------------------
-        # STEP 13 — Final debug
-        # -----------------------------------------------------
-
-        final_documents = (
-            final_results
-            .get("documents", [[]])[0]
-        )
-
-        final_metadatas = (
-            final_results
-            .get("metadatas", [[]])[0]
-        )
-
-        final_distances = (
-            final_results
-            .get("distances", [[]])[0]
-        )
-
-        print(
-            "\n=== FINAL RETRIEVAL RESULTS ==="
-        )
-
-        for index, distance in enumerate(
-            final_distances
-        ):
-
-            metadata = (
-                final_metadatas[index]
-                if index < len(final_metadatas)
-                else {}
-            )
-
-            print(
-                f"Result {index} | "
-                f"Distance: {distance:.4f} | "
-                f"File: "
-                f"{metadata.get('filename')} | "
-                f"Visibility: "
-                f"{metadata.get('visibility')} | "
-                f"Chunk: "
-                f"{metadata.get('chunk_index')}"
-            )
-
-        print(
-            f"Total final chunks: "
-            f"{len(final_documents)}"
-        )
-
-        print(
-            "===============================\n"
-        )
-
-        return final_results
-
+        return {
+            "ids": [[i["id"] for i in final]],
+            "documents": [[i["document"] for i in final]],
+            "metadatas": [[i["metadata"] for i in final]],
+            "distances": [[i["distance"] for i in final]],
+        }

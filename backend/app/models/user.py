@@ -1,6 +1,8 @@
 import uuid
 
-from sqlalchemy import ForeignKey, String
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.connection import Base
@@ -45,6 +47,33 @@ class User(Base):
     role_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("roles.id"),
         nullable=False,
+    )
+
+    # Deactivated users cannot log in; their existing tokens stop working.
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+
+    # Incremented on password change / deactivation to revoke old JWTs.
+    token_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    group_memberships = relationship(
+        "GroupMember",
+        back_populates="user",
+        cascade="all, delete-orphan",
     )
 
     # --------------------------------------------------

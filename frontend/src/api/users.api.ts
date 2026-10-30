@@ -6,6 +6,9 @@ export interface ManagedUser {
   email: string;
   tenant_id: string;
   role: "ADMIN" | "USER" | "VIEWER";
+  is_active?: boolean;
+  groups?: string[];
+  last_login_at?: string | null;
 }
 
 export interface CreateUserRequest {
@@ -54,4 +57,9 @@ export const deleteUser = async (
   userId: string,
 ): Promise<void> => {
   await apiClient.delete(`/users/${userId}`);
+};
+
+export const updateUserStatus = async (userId: string, isActive: boolean): Promise<ManagedUser> => {
+  const response = await apiClient.patch<ManagedUser>(`/users/${userId}/status`, { is_active: isActive });
+  return response.data;
 };

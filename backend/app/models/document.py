@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -48,6 +48,7 @@ class Document(Base):
 
     # PRIVATE  -> Only the uploader can access
     # TENANT   -> Authorized users/viewers in the same tenant can access
+    # GROUP    -> Members of one team space (group_id) can access
     visibility: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
@@ -55,10 +56,67 @@ class Document(Base):
         index=True,
     )
 
+    group_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     processed: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
         nullable=False,
+    )
+
+    # queued -> processing -> ready | failed
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="queued",
+        server_default="ready",
+        index=True,
+    )
+
+    # Safe, user-facing reason when processing failed (no stack traces).
+    error_message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    chunk_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    page_count: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    file_size: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
+
+    # SHA-256 of the uploaded bytes, used to detect duplicate uploads.
+    content_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+
+    # {"AADHAAR": 2, "PAN": 1, ...} and the mode applied ("flag"/"redact").
+    pii_summary: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -76,3 +134,5 @@ class Document(Base):
         "Tenant",
         back_populates="documents",
     )
+
+    group = relationship("Group")

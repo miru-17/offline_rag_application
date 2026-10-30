@@ -5,6 +5,12 @@ import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined";
 import GroupOutlinedIcon from "@mui/icons-material/GroupOutlined";
 import WorkspacePremiumOutlinedIcon from "@mui/icons-material/WorkspacePremiumOutlined";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
+import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
+import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
+import DifferenceOutlinedIcon from "@mui/icons-material/DifferenceOutlined";
+import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
+import QueryStatsOutlinedIcon from "@mui/icons-material/QueryStatsOutlined";
+import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 
 export type Role = "ADMIN" | "USER" | "VIEWER";
 
@@ -43,6 +49,54 @@ export const NAV_ITEMS: NavItem[] = [
     section: "workspace",
   },
   {
+    label: "Data Dashboard",
+    path: "/data",
+    icon: <InsightsOutlinedIcon />,
+    roles: ["ADMIN", "USER", "VIEWER"],
+    description: "Charts and answers from CSV / Excel tables",
+    section: "workspace",
+  },
+  {
+    label: "Extraction",
+    path: "/extraction",
+    icon: <TableChartOutlinedIcon />,
+    roles: ["ADMIN", "USER"],
+    description: "Pull fields from many documents into one table",
+    section: "workspace",
+  },
+  {
+    label: "Compare",
+    path: "/compare",
+    icon: <DifferenceOutlinedIcon />,
+    roles: ["ADMIN", "USER", "VIEWER"],
+    description: "What changed between two document versions",
+    section: "workspace",
+  },
+  {
+    label: "Team spaces",
+    path: "/teams",
+    icon: <GroupsOutlinedIcon />,
+    roles: ["ADMIN", "USER", "VIEWER"],
+    description: "Documents shared with a team such as HR or Finance",
+    section: "workspace",
+  },
+  {
+    label: "Insights",
+    path: "/insights",
+    icon: <QueryStatsOutlinedIcon />,
+    roles: ["ADMIN"],
+    description: "Usage, answer quality, knowledge gaps and system health",
+    section: "admin",
+  },
+  {
+    label: "Audit log",
+    path: "/audit",
+    icon: <FactCheckOutlinedIcon />,
+    roles: ["ADMIN"],
+    description: "Who did what, and when",
+    section: "admin",
+  },
+  {
     label: "Users & roles",
     path: "/users",
     icon: <GroupOutlinedIcon />,
@@ -55,7 +109,7 @@ export const NAV_ITEMS: NavItem[] = [
     path: "/license",
     icon: <WorkspacePremiumOutlinedIcon />,
     roles: ["ADMIN"],
-    description: "License status and expiry",
+    description: "Signed licence status, expiry and installation",
     section: "admin",
   },
   {

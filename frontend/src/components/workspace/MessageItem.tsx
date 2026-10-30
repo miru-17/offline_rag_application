@@ -10,6 +10,7 @@ import Markdown from "./Markdown";
 import { SourceChips } from "./Sources";
 import { isNotFoundAnswer, type ChatMessage } from "./types";
 import { formatRelative } from "../../utils/format";
+import AnswerFeedback from "../rag/AnswerFeedback";
 
 interface MessageItemProps {
   message: ChatMessage;
@@ -127,9 +128,8 @@ function AssistantMessage({ message, modelName, citationsEnabled, onOpenSources 
   };
 
   let retrievalNote: string | null = null;
-  if (!notFound && sources.length === 0) {
-    if (message.fromHistory) retrievalNote = "Sources aren't saved with past conversations";
-    else if (citationsEnabled === false) retrievalNote = "Source citations are turned off for your organisation";
+  if (!notFound && sources.length === 0 && !message.streaming) {
+    if (citationsEnabled === false) retrievalNote = "Source citations are turned off for your organisation";
   }
 
   return (
@@ -200,6 +200,10 @@ function AssistantMessage({ message, modelName, citationsEnabled, onOpenSources 
             <Rail tone="generate" />
             <Box sx={{ minWidth: 0, flex: 1 }}>
               <Markdown text={message.content} />
+              {message.streaming && (
+                <Box component="span" aria-hidden sx={(theme) => ({ display: "inline-block", width: 7, height: 15, ml: 0.25,
+                  verticalAlign: "text-bottom", bgcolor: theme.palette.rag.generate, animation: "ragFadeIn 700ms ease infinite alternate" })} />
+              )}
             </Box>
           </Box>
         )}
@@ -217,6 +221,9 @@ function AssistantMessage({ message, modelName, citationsEnabled, onOpenSources 
               icon={<ManageSearchRoundedIcon />}
               label="View evidence"
             />
+          )}
+          {!message.streaming && (message.serverId || message.status === "stopped" || message.status === "error") && (
+            <AnswerFeedback messageId={message.serverId} initial={message.feedback ?? null} status={message.status} />
           )}
           {retrievalNote && (
             <Typography sx={{ fontSize: "0.72rem", color: "text.disabled", ml: 0.75 }}>{retrievalNote}</Typography>

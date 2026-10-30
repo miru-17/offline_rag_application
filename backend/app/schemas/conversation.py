@@ -2,11 +2,18 @@ import uuid
 from datetime import datetime
 
 
-from pydantic import BaseModel, ConfigDict
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConversationCreate(BaseModel):
-    title: str = "New Chat"
+    title: str = Field("New Chat", max_length=255)
+
+
+class FeedbackRequest(BaseModel):
+    rating: Literal["up", "down"]
+    reason: str | None = Field(None, max_length=500)
 
 
 class ConversationResponse(BaseModel):
@@ -22,6 +29,9 @@ class MessageResponse(BaseModel):
     id: uuid.UUID
     role: str
     content: str
+    sources: list | None = None
+    answer_status: str | None = None
+    feedback_rating: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

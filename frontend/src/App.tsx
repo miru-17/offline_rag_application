@@ -12,6 +12,12 @@ const AIWorkspace = lazy(() => import("./pages/AIWorkspace"));
 const Users = lazy(() => import("./pages/users"));
 const License = lazy(() => import("./pages/License"));
 const Settings = lazy(() => import("./pages/Settings"));
+const DataDashboard = lazy(() => import("./pages/DataDashboard"));
+const Extraction = lazy(() => import("./pages/Extraction"));
+const CompareDocuments = lazy(() => import("./pages/CompareDocuments"));
+const TeamSpaces = lazy(() => import("./pages/TeamSpaces"));
+const Insights = lazy(() => import("./pages/Insights"));
+const AuditLog = lazy(() => import("./pages/AuditLog"));
 
 function PageFallback() {
   return (
@@ -79,6 +85,14 @@ function App() {
             path="/license"
             element={<License />}
           />
+
+          <Route path="/data" element={<DataDashboard />} />
+          <Route path="/data/:datasetId" element={<DataDashboard />} />
+          <Route path="/extraction" element={<Extraction />} />
+          <Route path="/compare" element={<CompareDocuments />} />
+          <Route path="/teams" element={<TeamSpaces />} />
+          <Route path="/insights" element={<Insights />} />
+          <Route path="/audit" element={<AuditLog />} />
 
           {/* ==================== SETTINGS ==================== */}
 

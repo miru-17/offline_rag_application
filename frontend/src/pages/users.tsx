@@ -58,6 +58,7 @@ import {
   deleteUser,
   getUsers,
   updateUserRole,
+  updateUserStatus,
   type ManagedUser,
 } from "../api/users.api";
 
@@ -234,6 +235,21 @@ export default function Users() {
       setError(message);
     } finally {
       setIsUpdatingRole(false);
+    }
+  };
+
+  const handleToggleActive = async () => {
+    if (!selectedUser) return;
+    const target = selectedUser;
+    handleMenuClose();
+    try {
+      setError("");
+      const updated = await updateUserStatus(target.id, !(target.is_active ?? true));
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      setSuccessMessage(`"${updated.username}" ${updated.is_active ? "activated" : "deactivated — their sessions have ended"}.`);
+      setSnackbarOpen(true);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Failed to change account status.");
     }
   };
 
@@ -460,6 +476,8 @@ export default function Users() {
                         <TableCell>
                           <Typography variant="body2" color="text.secondary">
                             {managedUser.email}
+                            {managedUser.is_active === false && " · Deactivated"}
+                            {managedUser.groups && managedUser.groups.length > 0 && ` · ${managedUser.groups.join(", ")}`}
                           </Typography>
                         </TableCell>
 
@@ -510,6 +528,12 @@ export default function Users() {
           <EditOutlined fontSize="small" sx={{ mr: 1.5, color: "text.secondary" }} />
           Modify Role
         </MenuItem>
+
+        {selectedUser?.id !== currentUserId && (
+          <MenuItem onClick={() => void handleToggleActive()} sx={{ fontSize: "0.85rem" }}>
+            {selectedUser?.is_active === false ? "Activate account" : "Deactivate account"}
+          </MenuItem>
+        )}
 
         {selectedUser?.id !== currentUserId && (
           <MenuItem

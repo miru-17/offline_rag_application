@@ -6,7 +6,7 @@ import ErrorRoundedIcon from "@mui/icons-material/ErrorRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import ReplayRoundedIcon from "@mui/icons-material/ReplayRounded";
 
-import { uploadDocument } from "../../api/documents.api";
+import { uploadDocument, type UploadOptions } from "../../api/documents.api";
 import FileTypeIcon from "../common/FileTypeIcon";
 import { formatBytes, getApiErrorMessage } from "../../utils/format";
 
@@ -28,6 +28,9 @@ interface UploadZoneProps {
   tenantName?: string;
   large: boolean;
   onUploaded: () => void;
+  /** Who can use the uploaded files (private, organisation or a team space). */
+  uploadOptions?: UploadOptions;
+  sharingLabel?: string;
 }
 
 const validate = (file: File): string | null => {
@@ -38,7 +41,7 @@ const validate = (file: File): string | null => {
   return null;
 };
 
-export default function UploadZone({ isAdmin, tenantName, large, onUploaded }: UploadZoneProps) {
+export default function UploadZone({ isAdmin, tenantName, large, onUploaded, uploadOptions, sharingLabel }: UploadZoneProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
   const [jobs, setJobs] = useState<UploadJob[]>([]);
@@ -59,9 +62,9 @@ export default function UploadZone({ isAdmin, tenantName, large, onUploaded }: U
       patch(job.id, { status: "uploading", progress: 0, error: undefined });
       try {
         await uploadDocument(job.file, (percent) => {
-          // Bytes sent is real; once complete the server parses, chunks and embeds.
+          // Bytes sent is real; the server then indexes it in the background.
           patch(job.id, percent >= 100 ? { status: "indexing", progress: 100 } : { progress: percent });
-        });
+        }, uploadOptions);
         patch(job.id, { status: "done", progress: 100 });
         uploadedAny = true;
         onUploaded();
@@ -192,9 +195,10 @@ export default function UploadZone({ isAdmin, tenantName, large, onUploaded }: U
           </Typography>
           <Typography sx={{ fontSize: "0.78rem", color: "text.secondary", mt: 0.25 }}>
             PDF, Word or Excel, up to 25 MB each.{" "}
-            {isAdmin
-              ? `Files you upload are shared with everyone in ${tenantName ?? "your organisation"}.`
-              : "Files you upload are private to you."}
+            {sharingLabel ??
+              (isAdmin
+                ? `Files you upload are shared with everyone in ${tenantName ?? "your organisation"}.`
+                : "Files you upload are private to you.")}
           </Typography>
         </Box>
         {!large && (
@@ -233,8 +237,8 @@ function UploadRow({ job, onRetry, onRemove }: { job: UploadJob; onRetry: () => 
   const label = {
     queued: "Waiting…",
     uploading: `Uploading ${job.progress}%`,
-    indexing: "Extracting text and indexing…",
-    done: "Indexed and ready for questions",
+    indexing: "Upload complete…",
+    done: "Uploaded — indexing in the background (see the list below)",
     failed: job.error ?? "Failed",
   }[job.status];
 

@@ -1,10 +1,13 @@
 import {
+  useEffect,
   useState,
   type ComponentProps,
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+
+import { getSetupStatus } from "../api/auth.api";
 
 import {
   Alert,
@@ -534,6 +537,18 @@ export default function Login() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Sign-up is available on first run (creates the administrator) or when
+  // the administrator has enabled self-registration.
+  const [setup, setSetup] = useState<{ needs_setup: boolean; self_registration: boolean } | null>(null);
+  useEffect(() => {
+    getSetupStatus()
+      .then((status) => {
+        setSetup(status);
+        if (status.needs_setup) setMode("signup");
+      })
+      .catch(() => setSetup(null));
+  }, []);
+
   // -----------------------------------------------------------
   // Field helpers
   // -----------------------------------------------------------
@@ -552,6 +567,13 @@ export default function Login() {
   };
 
   const switchMode = () => {
+    if (mode === "login" && setup && !setup.self_registration) {
+      setNotice({
+        type: "error",
+        message: "Self-registration is disabled. Ask your administrator to create an account for you.",
+      });
+      return;
+    }
     setMode((current) =>
       current === "login" ? "signup" : "login",
     );
@@ -669,9 +691,11 @@ export default function Login() {
         });
         setNotice({
           type: "success",
-          message:
-            "Account created. Sign in to continue.",
+          message: setup?.needs_setup
+            ? "Administrator account created. Sign in, then install your licence."
+            : "Account created. Sign in to continue.",
         });
+        if (setup?.needs_setup) setSetup({ needs_setup: false, self_registration: false });
       } catch (signupError) {
         setNotice({
           type: "error",

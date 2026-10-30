@@ -41,7 +41,7 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import {
   getLicenseStatus,
-  updateLicenseExpiry,
+  installLicense,
   type LicenseStatusResponse,
 } from "../api/license.api";
 
@@ -69,18 +69,9 @@ function getDaysRemaining(expiresAt: string): number {
   return Math.ceil(difference / (1000 * 60 * 60 * 24));
 }
 
-function toDateInputValue(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
-function dateInputToISO(value: string): string {
-  return `${value}T23:59:59Z`;
-}
+
+
 
 /* =========================================================
    COMPONENT
@@ -137,9 +128,7 @@ export default function License() {
     return getDaysRemaining(license.expires_at);
   }, [license?.expires_at]);
 
-  const isActive = Boolean(
-    licenseData?.licensed && license?.is_active && daysRemaining > 0,
-  );
+  const isActive = Boolean(licenseData?.licensed);
 
   const handleCopy = async () => {
     if (!license?.license_key) return;
@@ -153,8 +142,7 @@ export default function License() {
   };
 
   const handleOpenEdit = () => {
-    if (!license?.expires_at) return;
-    setNewExpiryDate(toDateInputValue(license.expires_at));
+    setNewExpiryDate("");
     setEditError(null);
     setSuccess(null);
     setEditOpen(true);
@@ -166,50 +154,38 @@ export default function License() {
     setEditError(null);
   };
 
+  // newExpiryDate holds the pasted / loaded signed licence file.
   const handleSaveExpiry = async () => {
-    if (!newExpiryDate) {
-      setEditError("Please select an expiry date.");
+    if (!newExpiryDate.trim()) {
+      setEditError("Choose the .license file you received, or paste its contents.");
       return;
     }
-
-    const selectedDate = new Date(`${newExpiryDate}T23:59:59`);
-    const now = new Date();
-
-    if (Number.isNaN(selectedDate.getTime())) {
-      setEditError("Please select a valid expiry date.");
-      return;
-    }
-
-    if (selectedDate <= now) {
-      setEditError("Expiry date must be in the future.");
-      return;
-    }
-
     try {
       setIsSaving(true);
       setEditError(null);
       setError(null);
       setSuccess(null);
-
-      const updatedLicense = await updateLicenseExpiry(dateInputToISO(newExpiryDate));
-
-      setLicenseData((previous) => {
-        if (!previous) return previous;
-        return {
-          ...previous,
-          licensed: updatedLicense.is_active,
-          license: updatedLicense,
-        };
-      });
-
+      setLicenseData(await installLicense(newExpiryDate.trim()));
       setEditOpen(false);
-      setSuccess("License expiry date updated successfully.");
+      setSuccess("Licence installed successfully.");
     } catch (err) {
-      console.error("Failed to update license expiry:", err);
-      setEditError("Unable to update the expiry date. Please try again.");
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setEditError(typeof detail === "string" ? detail : "Unable to install this licence file.");
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleLicenseFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 20000) {
+      setEditError("This does not look like a licence file (too large).");
+      return;
+    }
+    setNewExpiryDate(await file.text());
+    setEditError(null);
   };
 
   if (!isAdmin) {
@@ -270,6 +246,15 @@ export default function License() {
         <Alert severity="success" onClose={() => setSuccess(null)} sx={{ borderRadius: 2 }}>
           {success}
         </Alert>
+      )}
+
+      {licenseData && !licenseData.licensed && (
+        <Alert severity={licenseData.state === "missing" ? "info" : "warning"} sx={{ borderRadius: 2 }}>
+          {licenseData.message} Install the signed licence file from your vendor to enable uploads and chat.
+        </Alert>
+      )}
+      {licenseData?.state === "grace" && (
+        <Alert severity="warning" sx={{ borderRadius: 2 }}>{licenseData.message}</Alert>
       )}
 
       {isLoading ? (
@@ -364,7 +349,7 @@ export default function License() {
                   onClick={handleOpenEdit}
                   sx={{ borderRadius: 2, fontWeight: 650 }}
                 >
-                  Extend Expiry Date
+                  {license ? "Install new licence" : "Install licence"}
                 </Button>
               </Box>
 
@@ -518,9 +503,9 @@ export default function License() {
       {/* ========================================================
           EDIT EXPIRY MODAL
           ======================================================== */}
-      <Dialog open={editOpen} onClose={handleCloseEdit} maxWidth="xs" fullWidth>
+      <Dialog open={editOpen} onClose={handleCloseEdit} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 800 }}>
-          Extend License Expiry
+          Install signed licence
         </DialogTitle>
         <DialogContent dividers>
           {editError && (
@@ -530,17 +515,25 @@ export default function License() {
           )}
 
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Set a new target expiration date for this offline on-premise installation.
+            Licences are signed by the vendor and cannot be edited here. Choose the <b>.license</b> file you
+            received, or paste its contents. Expiry, user limit and features come from the signed file.
           </Typography>
+
+          <Button variant="outlined" component="label" disabled={isSaving} sx={{ mb: 2 }}>
+            Choose licence file
+            <input hidden type="file" accept=".license,.json,.txt" onChange={(e) => void handleLicenseFile(e)} />
+          </Button>
 
           <TextField
             fullWidth
-            type="date"
-            label="Expiry Date"
+            multiline
+            minRows={5}
+            label="Licence file contents"
+            placeholder='{"format": "ragentis-license-v1", ...}'
             value={newExpiryDate}
             onChange={(e) => setNewExpiryDate(e.target.value)}
-            slotProps={{ inputLabel: { shrink: true } }}
             disabled={isSaving}
+            slotProps={{ htmlInput: { style: { fontFamily: "monospace", fontSize: 12 } } }}
           />
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2 }}>
@@ -553,7 +546,7 @@ export default function License() {
             disabled={isSaving}
             startIcon={isSaving ? <CircularProgress size={16} color="inherit" /> : <EditOutlined />}
           >
-            {isSaving ? "Saving..." : "Apply New Expiry"}
+            {isSaving ? "Verifying..." : "Install licence"}
           </Button>
         </DialogActions>
       </Dialog>

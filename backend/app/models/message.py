@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.connection import Base
@@ -32,6 +32,30 @@ class Message(Base):
     content: Mapped[str] = mapped_column(
         Text,
         nullable=False,
+    )
+
+    # Evidence shown with an assistant answer: file, page, excerpt.
+    sources: Mapped[list | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    # answered | not_found | stopped | error  (assistant messages only)
+    answer_status: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        index=True,
+    )
+
+    # up | down, set by the user who owns the conversation.
+    feedback_rating: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+    )
+
+    feedback_reason: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(

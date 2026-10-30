@@ -1,4 +1,4 @@
-import type { QuerySource } from "../../api/query.api";
+import type { AnswerStatus, QuerySource } from "../../api/query.api";
 
 export interface ChatMessage {
   id: string;
@@ -10,6 +10,12 @@ export interface ChatMessage {
   fromHistory?: boolean;
   /** Animate on first render only for messages created in this session. */
   fresh?: boolean;
+  /** Server id of an assistant answer (used for 👍 / 👎 feedback). */
+  serverId?: string;
+  status?: AnswerStatus | null;
+  feedback?: "up" | "down" | null;
+  /** True while tokens are still arriving. */
+  streaming?: boolean;
 }
 
 /** The backend's fixed reply when retrieval finds nothing relevant. */
@@ -30,10 +36,12 @@ export const getSourcePage = (source: QuerySource): string | null => {
     if (typeof value === "number") return String(value);
     if (typeof value === "string" && value.trim()) return value.trim();
   }
+  if (typeof source.sheet === "string" && source.sheet.trim()) return `sheet ${source.sheet.trim()}`;
   return null;
 };
 
 export const getSourceSnippet = (source: QuerySource): string | null => {
+  if (typeof source.excerpt === "string" && source.excerpt.trim()) return source.excerpt.trim();
   if (typeof source.content === "string" && source.content.trim()) return source.content.trim();
   const meta = source.metadata as Record<string, unknown> | undefined;
   if (meta && typeof meta.snippet === "string") return meta.snippet.trim();
