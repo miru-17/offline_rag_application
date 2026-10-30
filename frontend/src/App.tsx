@@ -1,19 +1,32 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
+import { Box, CircularProgress } from "@mui/material";
 
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
-import Dashboard from "./pages/Dashboard";
-import Documents from "./pages/Documents";
-import AIWorkspace from "./pages/AIWorkspace";
-import Users from "./pages/users";
-import License from "./pages/License";
-import Settings from "./pages/Settings";
+
+// Authenticated pages are code-split so the login screen loads quickly.
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Documents = lazy(() => import("./pages/Documents"));
+const AIWorkspace = lazy(() => import("./pages/AIWorkspace"));
+const Users = lazy(() => import("./pages/users"));
+const License = lazy(() => import("./pages/License"));
+const Settings = lazy(() => import("./pages/Settings"));
+
+function PageFallback() {
+  return (
+    <Box sx={{ display: "grid", placeItems: "center", minHeight: "50vh" }}>
+      <CircularProgress size={22} thickness={5} />
+    </Box>
+  );
+}
 
 import ProtectedRoute from "./auth/ProtectedRoute";
 import AppLayout from "./components/layout/AppLayout";
 
 function App() {
   return (
+    <Suspense fallback={<PageFallback />}>
     <Routes>
       {/* ==================== PUBLIC ROUTES ==================== */}
 
@@ -101,6 +114,7 @@ function App() {
         }
       />
     </Routes>
+    </Suspense>
   );
 }
 

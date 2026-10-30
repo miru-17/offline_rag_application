@@ -27,6 +27,7 @@ export const getDocuments = async (): Promise<DocumentItem[]> => {
 
 export const uploadDocument = async (
   file: File,
+  onUploadProgress?: (percent: number) => void,
 ): Promise<DocumentItem> => {
   const formData = new FormData();
 
@@ -38,6 +39,13 @@ export const uploadDocument = async (
     {
       headers: {
         "Content-Type": "multipart/form-data",
+      },
+      onUploadProgress: (event) => {
+        if (onUploadProgress && event.total) {
+          onUploadProgress(
+            Math.round((event.loaded / event.total) * 100),
+          );
+        }
       },
     },
   );
@@ -53,15 +61,15 @@ export const deleteDocument = async (
   );
 };
 
+/** Shape returned by GET /documents/{id}. */
 export interface DocumentDetails {
   id: string;
-  user_id: string;
   tenant_id: string;
   filename: string;
   file_type: string;
-  file_path: string;
+  visibility?: "TENANT" | "PRIVATE" | string;
   processed: boolean;
-  created_at: string;
+  uploaded_at?: string;
 }
 
 export const getDocument = async (

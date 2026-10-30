@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: offline_rag
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - copy .env.example to .env}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -36,8 +36,12 @@ services:
       ollama:
         condition: service_started
     environment:
-      DATABASE_URL: "postgresql+psycopg2://postgres:${POSTGRES_PASSWORD}@postgres:5432/offline_rag"
-      JWT_SECRET_KEY: "${JWT_SECRET_KEY}"
+      # The password is supplied via PGPASSWORD (read by libpq/psycopg2)
+      # instead of being embedded in the URL, so special characters such
+      # as '@' in the password do not need URL-encoding.
+      DATABASE_URL: "postgresql+psycopg2://postgres@postgres:5432/offline_rag"
+      PGPASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - copy .env.example to .env}"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:?JWT_SECRET_KEY is not set - copy .env.example to .env}"
       OLLAMA_URL: "http://ollama:11434/api/generate"
       OLLAMA_TAGS_URL: "http://ollama:11434/api/tags"
       OLLAMA_MODEL: "llama3.2:3b"

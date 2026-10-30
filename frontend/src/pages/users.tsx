@@ -4,7 +4,6 @@ import {
   useMemo,
   useState,
   type MouseEvent,
-  type ReactElement,
 } from "react";
 
 import {
@@ -12,14 +11,16 @@ import {
   Avatar,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   FormControl,
+  Grid,
   IconButton,
   InputAdornment,
   InputLabel,
@@ -36,7 +37,6 @@ import {
   TableHead,
   TableRow,
   TextField,
-  Tooltip,
   Typography,
 } from "@mui/material";
 
@@ -47,13 +47,12 @@ import {
   EditOutlined,
   GroupOutlined,
   MoreVert,
-  PersonOutlined,
   Visibility,
   VisibilityOff,
+  SearchOutlined,
 } from "@mui/icons-material";
 
 import { useAuth } from "../auth/AuthContext";
-
 import {
   createUser,
   deleteUser,
@@ -64,179 +63,64 @@ import {
 
 type Role = "ADMIN" | "USER" | "VIEWER";
 
-const ROLE_OPTIONS: Role[] = [
-  "ADMIN",
-  "USER",
-  "VIEWER",
-];
+const ROLE_OPTIONS: Role[] = ["ADMIN", "USER", "VIEWER"];
 
-const ROLE_CONFIG: Record<
-  Role,
-  {
-    label: string;
-    description: string;
-  }
-> = {
+const ROLE_CONFIG: Record<Role, { label: string; description: string }> = {
   ADMIN: {
     label: "Administrator",
-    description:
-      "Full system and user management access",
+    description: "Full system configuration, user provisioning, and license controls",
   },
   USER: {
-    label: "User",
-    description:
-      "Can manage documents and use AI workspace",
+    label: "Knowledge Worker",
+    description: "Uploads documents and conducts reasoning queries in the AI workspace",
   },
   VIEWER: {
-    label: "Viewer",
-    description:
-      "Read-only access to documents and AI workspace",
+    label: "Auditor / Viewer",
+    description: "Read-only access to view document library and query intelligence",
   },
 };
 
 function getInitials(username: string): string {
   const parts = username.trim().split(/\s+/);
-
   if (parts.length === 1) {
     return parts[0].slice(0, 2).toUpperCase();
   }
-
-  return `${parts[0][0]}${
-    parts[parts.length - 1][0]
-  }`.toUpperCase();
-}
-
-function getRoleIcon(role: Role): ReactElement {
-  switch (role) {
-    case "ADMIN":
-      return (
-        <AdminPanelSettings fontSize="small" />
-      );
-
-    case "VIEWER":
-      return <Visibility fontSize="small" />;
-
-    default:
-      return <PersonOutlined fontSize="small" />;
-  }
-}
-
-function getRoleChipStyles(role: Role) {
-  switch (role) {
-    case "ADMIN":
-      return {
-        color: "#7c3aed",
-        backgroundColor:
-          "rgba(124, 58, 237, 0.10)",
-        borderColor:
-          "rgba(124, 58, 237, 0.25)",
-      };
-
-    case "VIEWER":
-      return {
-        color: "#0284c7",
-        backgroundColor:
-          "rgba(2, 132, 199, 0.10)",
-        borderColor:
-          "rgba(2, 132, 199, 0.25)",
-      };
-
-    default:
-      return {
-        color: "#059669",
-        backgroundColor:
-          "rgba(5, 150, 105, 0.10)",
-        borderColor:
-          "rgba(5, 150, 105, 0.25)",
-      };
-  }
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
 export default function Users() {
   const { user } = useAuth();
-
   const currentUserId = user?.id;
+  const isAdmin = user?.role?.toUpperCase() === "ADMIN";
 
-  const isAdmin =
-    user?.role?.toUpperCase() === "ADMIN";
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string>("");
+  const [successMessage, setSuccessMessage] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
-  const [users, setUsers] = useState<
-    ManagedUser[]
-  >([]);
+  // Add user dialog
+  const [addDialogOpen, setAddDialogOpen] = useState<boolean>(false);
+  const [username, setUsername] = useState<string>("");
+  const [email, setEmail] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+  const [role, setRole] = useState<Role>("USER");
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [isCreating, setIsCreating] = useState<boolean>(false);
 
-  const [isLoading, setIsLoading] =
-    useState<boolean>(true);
+  // Action menu
+  const [menuAnchorEl, setMenuAnchorEl] = useState<HTMLElement | null>(null);
+  const [selectedUser, setSelectedUser] = useState<ManagedUser | null>(null);
 
-  const [error, setError] =
-    useState<string>("");
+  // Role dialog
+  const [roleDialogOpen, setRoleDialogOpen] = useState<boolean>(false);
+  const [selectedRole, setSelectedRole] = useState<Role>("USER");
+  const [isUpdatingRole, setIsUpdatingRole] = useState<boolean>(false);
 
-  const [successMessage, setSuccessMessage] =
-    useState<string>("");
-
-  /* =========================
-     ADD USER
-  ========================= */
-
-  const [addDialogOpen, setAddDialogOpen] =
-    useState<boolean>(false);
-
-  const [username, setUsername] =
-    useState<string>("");
-
-  const [email, setEmail] =
-    useState<string>("");
-
-  const [password, setPassword] =
-    useState<string>("");
-
-  const [role, setRole] =
-    useState<Role>("USER");
-
-  const [showPassword, setShowPassword] =
-    useState<boolean>(false);
-
-  const [isCreating, setIsCreating] =
-    useState<boolean>(false);
-
-  /* =========================
-     ACTION MENU
-  ========================= */
-
-  const [menuAnchorEl, setMenuAnchorEl] =
-    useState<HTMLElement | null>(null);
-
-  const [selectedUser, setSelectedUser] =
-    useState<ManagedUser | null>(null);
-
-  /* =========================
-     ROLE DIALOG
-  ========================= */
-
-  const [roleDialogOpen, setRoleDialogOpen] =
-    useState<boolean>(false);
-
-  const [selectedRole, setSelectedRole] =
-    useState<Role>("USER");
-
-  const [isUpdatingRole, setIsUpdatingRole] =
-    useState<boolean>(false);
-
-  /* =========================
-     DELETE DIALOG
-  ========================= */
-
-  const [deleteDialogOpen, setDeleteDialogOpen] =
-    useState<boolean>(false);
-
-  const [isDeleting, setIsDeleting] =
-    useState<boolean>(false);
-
-  const [snackbarOpen, setSnackbarOpen] =
-    useState<boolean>(false);
-
-  /* =========================
-     LOAD USERS
-  ========================= */
+  // Delete dialog
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
 
   const loadUsers = useCallback(async () => {
     if (!isAdmin) {
@@ -247,15 +131,10 @@ export default function Users() {
     try {
       setError("");
       setIsLoading(true);
-
       const data = await getUsers();
-
       setUsers(data);
     } catch (err: any) {
-      const message =
-        err?.response?.data?.detail ||
-        "Failed to load users.";
-
+      const message = err?.response?.data?.detail || "Failed to load users.";
       setError(message);
     } finally {
       setIsLoading(false);
@@ -266,31 +145,14 @@ export default function Users() {
     void loadUsers();
   }, [loadUsers]);
 
-  /* =========================
-     STATS
-  ========================= */
-
   const stats = useMemo(() => {
     return {
       total: users.length,
-
-      admins: users.filter(
-        (item) => item.role === "ADMIN",
-      ).length,
-
-      users: users.filter(
-        (item) => item.role === "USER",
-      ).length,
-
-      viewers: users.filter(
-        (item) => item.role === "VIEWER",
-      ).length,
+      admins: users.filter((u) => u.role === "ADMIN").length,
+      users: users.filter((u) => u.role === "USER").length,
+      viewers: users.filter((u) => u.role === "VIEWER").length,
     };
   }, [users]);
-
-  /* =========================
-     ADD USER HANDLERS
-  ========================= */
 
   const resetAddForm = () => {
     setUsername("");
@@ -300,47 +162,23 @@ export default function Users() {
     setShowPassword(false);
   };
 
-  const handleOpenAddDialog = () => {
-    resetAddForm();
-    setAddDialogOpen(true);
-  };
-
-  const handleCloseAddDialog = () => {
-    if (isCreating) {
-      return;
-    }
-
-    setAddDialogOpen(false);
-    resetAddForm();
-  };
-
   const handleCreateUser = async () => {
     if (!username.trim()) {
       setError("Username is required.");
       return;
     }
-
     if (!email.trim()) {
       setError("Email is required.");
       return;
     }
-
-    if (!password) {
-      setError("Password is required.");
-      return;
-    }
-
-    if (password.length < 6) {
-      setError(
-        "Password must contain at least 6 characters.",
-      );
+    if (!password || password.length < 6) {
+      setError("Password must contain at least 6 characters.");
       return;
     }
 
     try {
       setIsCreating(true);
       setError("");
-
       const newUser = await createUser({
         username: username.trim(),
         email: email.trim(),
@@ -348,38 +186,20 @@ export default function Users() {
         role,
       });
 
-      setUsers((currentUsers) => [
-        ...currentUsers,
-        newUser,
-      ]);
-
+      setUsers((prev) => [...prev, newUser]);
       setAddDialogOpen(false);
       resetAddForm();
-
-      setSuccessMessage(
-        `User "${newUser.username}" was created successfully.`,
-      );
-
+      setSuccessMessage(`User "${newUser.username}" provisioned successfully.`);
       setSnackbarOpen(true);
     } catch (err: any) {
-      const message =
-        err?.response?.data?.detail ||
-        "Failed to create user.";
-
+      const message = err?.response?.data?.detail || "Failed to provision user.";
       setError(message);
     } finally {
       setIsCreating(false);
     }
   };
 
-  /* =========================
-     ACTION MENU
-  ========================= */
-
-  const handleMenuOpen = (
-    event: MouseEvent<HTMLElement>,
-    managedUser: ManagedUser,
-  ) => {
+  const handleMenuOpen = (event: MouseEvent<HTMLElement>, managedUser: ManagedUser) => {
     setMenuAnchorEl(event.currentTarget);
     setSelectedUser(managedUser);
   };
@@ -388,1582 +208,489 @@ export default function Users() {
     setMenuAnchorEl(null);
   };
 
-  /* =========================
-     ROLE UPDATE
-  ========================= */
-
   const handleOpenRoleDialog = () => {
-    if (!selectedUser) {
-      return;
-    }
-
+    if (!selectedUser) return;
     setSelectedRole(selectedUser.role);
     setRoleDialogOpen(true);
     handleMenuClose();
   };
 
-  const handleCloseRoleDialog = () => {
-    if (isUpdatingRole) {
-      return;
-    }
-
-    setRoleDialogOpen(false);
-    setSelectedUser(null);
-  };
-
   const handleUpdateRole = async () => {
-    if (!selectedUser) {
-      return;
-    }
-
-    if (selectedUser.id === currentUserId) {
-      setError(
-        "You cannot change your own role.",
-      );
-      return;
-    }
-
+    if (!selectedUser) return;
     try {
       setIsUpdatingRole(true);
       setError("");
 
-      const updatedUser =
-        await updateUserRole(
-          selectedUser.id,
-          {
-            role: selectedRole,
-          },
-        );
-
-      setUsers((currentUsers) =>
-        currentUsers.map((item) =>
-          item.id === updatedUser.id
-            ? updatedUser
-            : item,
-        ),
+      const updated = await updateUserRole(selectedUser.id, { role: selectedRole });
+      setUsers((prev) =>
+        prev.map((u) => (u.id === updated.id ? { ...u, role: updated.role } : u)),
       );
 
       setRoleDialogOpen(false);
-      setSelectedUser(null);
-
-      setSuccessMessage(
-        `Role updated for "${updatedUser.username}".`,
-      );
-
+      setSuccessMessage(`Role for "${selectedUser.username}" updated to ${selectedRole}.`);
       setSnackbarOpen(true);
     } catch (err: any) {
-      const message =
-        err?.response?.data?.detail ||
-        "Failed to update user role.";
-
+      const message = err?.response?.data?.detail || "Failed to update user role.";
       setError(message);
     } finally {
       setIsUpdatingRole(false);
     }
   };
 
-  /* =========================
-     DELETE USER
-  ========================= */
-
   const handleOpenDeleteDialog = () => {
-    if (!selectedUser) {
-      return;
-    }
-
     setDeleteDialogOpen(true);
     handleMenuClose();
   };
 
-  const handleCloseDeleteDialog = () => {
-    if (isDeleting) {
-      return;
-    }
-
-    setDeleteDialogOpen(false);
-    setSelectedUser(null);
-  };
-
   const handleDeleteUser = async () => {
-    if (!selectedUser) {
-      return;
-    }
-
-    if (selectedUser.id === currentUserId) {
-      setError(
-        "You cannot delete your own account.",
-      );
-      return;
-    }
-
+    if (!selectedUser) return;
     try {
       setIsDeleting(true);
       setError("");
 
       await deleteUser(selectedUser.id);
-
-      setUsers((currentUsers) =>
-        currentUsers.filter(
-          (item) =>
-            item.id !== selectedUser.id,
-        ),
-      );
-
+      setUsers((prev) => prev.filter((u) => u.id !== selectedUser.id));
       setDeleteDialogOpen(false);
-
-      setSuccessMessage(
-        `User "${selectedUser.username}" was deleted successfully.`,
-      );
-
+      setSuccessMessage(`User "${selectedUser.username}" removed.`);
       setSnackbarOpen(true);
-
-      setSelectedUser(null);
     } catch (err: any) {
-      const message =
-        err?.response?.data?.detail ||
-        "Failed to delete user.";
-
+      const message = err?.response?.data?.detail || "Failed to delete user.";
       setError(message);
     } finally {
       setIsDeleting(false);
     }
   };
 
-  const handleSnackbarClose = () => {
-    setSnackbarOpen(false);
-  };
-
-  /* =========================
-     ADMIN PROTECTION
-  ========================= */
+  const filteredUsers = users.filter((u) => {
+    const q = searchQuery.toLowerCase();
+    return u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
+  });
 
   if (!isAdmin) {
     return (
-      <Box
-        sx={{
-          minHeight:
-            "calc(100vh - 80px)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          px: 3,
-        }}
-      >
-        <Paper
-          elevation={0}
-          sx={{
-            width: "100%",
-            maxWidth: 520,
-            p: {
-              xs: 4,
-              sm: 5,
-            },
-            borderRadius: 4,
-            textAlign: "center",
-            border:
-              "1px solid rgba(15, 23, 42, 0.08)",
-            background:
-              "linear-gradient(145deg, #ffffff 0%, #f8fafc 100%)",
-          }}
-        >
-          <Avatar
-            sx={{
-              width: 72,
-              height: 72,
-              mx: "auto",
-              mb: 2.5,
-              backgroundColor:
-                "rgba(124, 58, 237, 0.10)",
-              color: "#7c3aed",
-            }}
-          >
-            <AdminPanelSettings
-              sx={{ fontSize: 36 }}
-            />
-          </Avatar>
-
-          <Typography
-            variant="h5"
-            sx={{
-              mb: 1,
-              fontWeight: 800,
-            }}
-          >
-            Admin Access Required
+      <Box sx={{ py: 8, display: "flex", justifyContent: "center" }}>
+        <Card sx={{ maxWidth: 480, p: 4, textAlign: "center", borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
+          <AdminPanelSettings sx={{ fontSize: 48, color: "text.disabled", mb: 2 }} />
+          <Typography variant="h6" sx={{ fontWeight: 750, mb: 1 }}>
+            Administrator Access Required
           </Typography>
-
-          <Typography
-            variant="body1"
-            color="text.secondary"
-          >
-            User management is available only
-            to administrators.
+          <Typography variant="body2" color="text.secondary">
+            Only administrators are authorized to manage user accounts and modify tenant role permissions.
           </Typography>
-        </Paper>
+        </Card>
       </Box>
     );
   }
 
-  /* =========================
-     MAIN PAGE
-  ========================= */
-
   return (
-    <Box
-      sx={{
-        width: "100%",
-        maxWidth: 1500,
-        mx: "auto",
-        px: {
-          xs: 2,
-          sm: 3,
-          lg: 4,
-        },
-        py: {
-          xs: 2,
-          sm: 3,
-        },
-      }}
-    >
+    <Stack spacing={3}>
       {/* HEADER */}
-
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: {
-            xs: "column",
-            sm: "row",
-          },
-          alignItems: {
-            xs: "flex-start",
-            sm: "center",
-          },
-          justifyContent:
-            "space-between",
-          gap: 2,
-          mb: 3,
-        }}
-      >
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 2 }}>
         <Box>
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: 1.2,
-              mb: 0.75,
-            }}
-          >
-            <Box
-              sx={{
-                width: 42,
-                height: 42,
-                borderRadius: 2.5,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background:
-                  "linear-gradient(135deg, #312e81 0%, #7c3aed 100%)",
-                color: "#fff",
-                boxShadow:
-                  "0 8px 24px rgba(79, 70, 229, 0.25)",
-              }}
-            >
-              <GroupOutlined />
-            </Box>
-
-            <Typography
-              variant="h4"
-              sx={{
-                color: "#0f172a",
-                letterSpacing: "-0.5px",
-                fontWeight: 800,
-              }}
-            >
-              Users
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: "-0.025em" }}>
+              Access Governance & User Directory
             </Typography>
+            <Chip
+              label="RBAC ENFORCED"
+              size="small"
+              sx={{ height: 20, fontSize: "0.6875rem", fontWeight: 700, bgcolor: "action.hover" }}
+            />
           </Box>
-
-          <Typography
-            variant="body1"
-            color="text.secondary"
-          >
-            Manage users, roles, and access
-            within your organization.
+          <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>
+            Manage identity entitlements and role-based access for your local tenant.
           </Typography>
         </Box>
 
         <Button
           variant="contained"
           startIcon={<Add />}
-          onClick={handleOpenAddDialog}
-          sx={{
-            borderRadius: 2.5,
-            px: 2.5,
-            py: 1.2,
-            fontWeight: 700,
-            textTransform: "none",
-            boxShadow:
-              "0 8px 22px rgba(79, 70, 229, 0.20)",
-            background:
-              "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)",
-            "&:hover": {
-              background:
-                "linear-gradient(135deg, #4338ca 0%, #6d28d9 100%)",
-            },
+          onClick={() => {
+            resetAddForm();
+            setAddDialogOpen(true);
           }}
+          sx={{ borderRadius: 2, px: 2.5 }}
         >
-          Add User
+          Provision User
         </Button>
       </Box>
 
       {/* ERROR */}
-
       {error && (
-        <Alert
-          severity="error"
-          onClose={() => setError("")}
-          sx={{
-            mb: 3,
-            borderRadius: 2.5,
-          }}
-        >
+        <Alert severity="error" onClose={() => setError("")} sx={{ borderRadius: 2 }}>
           {error}
         </Alert>
       )}
 
-      {/* STATS */}
-
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: {
-            xs: "1fr",
-            sm: "repeat(2, 1fr)",
-            lg: "repeat(4, 1fr)",
-          },
-          gap: 2,
-          mb: 3,
-        }}
-      >
-        {/* TOTAL */}
-
-        <Paper
-          elevation={0}
-          sx={{
-            p: 2.5,
-            borderRadius: 3,
-            border:
-              "1px solid rgba(15, 23, 42, 0.07)",
-            background:
-              "linear-gradient(145deg, #ffffff 0%, #f8fafc 100%)",
-          }}
-        >
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent:
-                "space-between",
-            }}
-          >
-            <Box>
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ fontWeight: 600 }}
-              >
-                Total Users
+      {/* METRICS STRIP */}
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card sx={{ borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
+            <CardContent sx={{ p: 2 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                TOTAL ACCOUNTS
               </Typography>
-
-              <Typography
-                variant="h4"
-                sx={{
-                  mt: 0.5,
-                  fontWeight: 800,
-                }}
-              >
+              <Typography variant="h4" className="font-mono" sx={{ fontWeight: 800, mt: 0.5 }}>
                 {stats.total}
               </Typography>
-            </Box>
+            </CardContent>
+          </Card>
+        </Grid>
 
-            <Avatar
-              sx={{
-                backgroundColor:
-                  "rgba(79, 70, 229, 0.10)",
-                color: "#4f46e5",
-              }}
-            >
-              <GroupOutlined />
-            </Avatar>
-          </Box>
-        </Paper>
-
-        {/* ADMINS */}
-
-        <Paper
-          elevation={0}
-          sx={{
-            p: 2.5,
-            borderRadius: 3,
-            border:
-              "1px solid rgba(15, 23, 42, 0.07)",
-            background:
-              "linear-gradient(145deg, #ffffff 0%, #f8fafc 100%)",
-          }}
-        >
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent:
-                "space-between",
-            }}
-          >
-            <Box>
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ fontWeight: 600 }}
-              >
-                Administrators
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card sx={{ borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
+            <CardContent sx={{ p: 2 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                ADMINISTRATORS
               </Typography>
-
-              <Typography
-                variant="h4"
-                sx={{
-                  mt: 0.5,
-                  fontWeight: 800,
-                }}
-              >
+              <Typography variant="h4" className="font-mono" sx={{ fontWeight: 800, mt: 0.5, color: "secondary.main" }}>
                 {stats.admins}
               </Typography>
-            </Box>
+            </CardContent>
+          </Card>
+        </Grid>
 
-            <Avatar
-              sx={{
-                backgroundColor:
-                  "rgba(124, 58, 237, 0.10)",
-                color: "#7c3aed",
-              }}
-            >
-              <AdminPanelSettings />
-            </Avatar>
-          </Box>
-        </Paper>
-
-        {/* USERS */}
-
-        <Paper
-          elevation={0}
-          sx={{
-            p: 2.5,
-            borderRadius: 3,
-            border:
-              "1px solid rgba(15, 23, 42, 0.07)",
-            background:
-              "linear-gradient(145deg, #ffffff 0%, #f8fafc 100%)",
-          }}
-        >
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent:
-                "space-between",
-            }}
-          >
-            <Box>
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ fontWeight: 600 }}
-              >
-                Users
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card sx={{ borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
+            <CardContent sx={{ p: 2 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                KNOWLEDGE WORKERS
               </Typography>
-
-              <Typography
-                variant="h4"
-                sx={{
-                  mt: 0.5,
-                  fontWeight: 800,
-                }}
-              >
+              <Typography variant="h4" className="font-mono" sx={{ fontWeight: 800, mt: 0.5, color: "primary.main" }}>
                 {stats.users}
               </Typography>
-            </Box>
+            </CardContent>
+          </Card>
+        </Grid>
 
-            <Avatar
-              sx={{
-                backgroundColor:
-                  "rgba(5, 150, 105, 0.10)",
-                color: "#059669",
-              }}
-            >
-              <PersonOutlined />
-            </Avatar>
-          </Box>
-        </Paper>
-
-        {/* VIEWERS */}
-
-        <Paper
-          elevation={0}
-          sx={{
-            p: 2.5,
-            borderRadius: 3,
-            border:
-              "1px solid rgba(15, 23, 42, 0.07)",
-            background:
-              "linear-gradient(145deg, #ffffff 0%, #f8fafc 100%)",
-          }}
-        >
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent:
-                "space-between",
-            }}
-          >
-            <Box>
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ fontWeight: 600 }}
-              >
-                Viewers
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Card sx={{ borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
+            <CardContent sx={{ p: 2 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                READ AUDITORS
               </Typography>
-
-              <Typography
-                variant="h4"
-                sx={{
-                  mt: 0.5,
-                  fontWeight: 800,
-                }}
-              >
+              <Typography variant="h4" className="font-mono" sx={{ fontWeight: 800, mt: 0.5, color: "info.main" }}>
                 {stats.viewers}
               </Typography>
-            </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
 
-            <Avatar
-              sx={{
-                backgroundColor:
-                  "rgba(2, 132, 199, 0.10)",
-                color: "#0284c7",
+      {/* USER TABLE */}
+      <Card sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
+        <CardContent sx={{ p: { xs: 2.5, md: 3 } }}>
+          <Box sx={{ mb: 2.5, maxWidth: 360 }}>
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="Search user or email..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <SearchOutlined sx={{ fontSize: 18, color: "text.disabled", mr: 1 }} />
+                  ),
+                },
               }}
-            >
-              <Visibility />
-            </Avatar>
-          </Box>
-        </Paper>
-      </Box>
-
-      {/* USERS TABLE */}
-
-      <Paper
-        elevation={0}
-        sx={{
-          borderRadius: 3,
-          overflow: "hidden",
-          border:
-            "1px solid rgba(15, 23, 42, 0.07)",
-          backgroundColor: "#fff",
-        }}
-      >
-        <Box
-          sx={{
-            px: {
-              xs: 2,
-              sm: 3,
-            },
-            py: 2.2,
-            display: "flex",
-            alignItems: "center",
-            justifyContent:
-              "space-between",
-            gap: 2,
-          }}
-        >
-          <Box>
-            <Typography
-              variant="h6"
-              sx={{
-                fontWeight: 800,
-              }}
-            >
-              Organization Users
-            </Typography>
-
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ mt: 0.3 }}
-            >
-              Users belonging to your current
-              tenant
-            </Typography>
-          </Box>
-
-          <Chip
-            label={`${users.length} ${
-              users.length === 1
-                ? "user"
-                : "users"
-            }`}
-            size="small"
-            sx={{
-              fontWeight: 700,
-              backgroundColor:
-                "rgba(79, 70, 229, 0.08)",
-              color: "#4f46e5",
-            }}
-          />
-        </Box>
-
-        <Divider />
-
-        {isLoading ? (
-          <Box
-            sx={{
-              minHeight: 280,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexDirection: "column",
-              gap: 2,
-            }}
-          >
-            <CircularProgress
-              size={32}
-              thickness={4}
             />
-
-            <Typography
-              variant="body2"
-              color="text.secondary"
-            >
-              Loading users...
-            </Typography>
           </Box>
-        ) : users.length === 0 ? (
-          <Box
-            sx={{
-              minHeight: 280,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexDirection: "column",
-              px: 3,
-              textAlign: "center",
-            }}
-          >
-            <Avatar
-              sx={{
-                width: 60,
-                height: 60,
-                mb: 2,
-                backgroundColor:
-                  "rgba(79, 70, 229, 0.08)",
-                color: "#4f46e5",
-              }}
-            >
-              <GroupOutlined />
-            </Avatar>
 
-            <Typography
-              variant="h6"
-              sx={{ fontWeight: 700 }}
-            >
-              No users found
-            </Typography>
-
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{
-                mt: 0.5,
-                mb: 2,
-              }}
-            >
-              Add your first organization user
-              to get started.
-            </Typography>
-
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={
-                handleOpenAddDialog
-              }
-              sx={{
-                textTransform: "none",
-                borderRadius: 2,
-              }}
-            >
-              Add User
-            </Button>
-          </Box>
-        ) : (
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow
-                  sx={{
-                    backgroundColor:
-                      "#f8fafc",
-                  }}
-                >
-                  <TableCell
-                    sx={{
-                      fontWeight: 800,
-                      color: "#475569",
-                      py: 1.8,
-                    }}
-                  >
-                    User
-                  </TableCell>
-
-                  <TableCell
-                    sx={{
-                      fontWeight: 800,
-                      color: "#475569",
-                      py: 1.8,
-                    }}
-                  >
-                    Email
-                  </TableCell>
-
-                  <TableCell
-                    sx={{
-                      fontWeight: 800,
-                      color: "#475569",
-                      py: 1.8,
-                    }}
-                  >
-                    Role
-                  </TableCell>
-
-                  <TableCell
-                    align="right"
-                    sx={{
-                      fontWeight: 800,
-                      color: "#475569",
-                      py: 1.8,
-                    }}
-                  >
-                    Actions
-                  </TableCell>
-                </TableRow>
-              </TableHead>
-
-              <TableBody>
-                {users.map(
-                  (managedUser) => {
-                    const userRole =
-                      managedUser.role as Role;
-
-                    const isCurrentUser =
-                      managedUser.id ===
-                      currentUserId;
-
-                    const roleStyles =
-                      getRoleChipStyles(
-                        userRole,
-                      );
+          {isLoading ? (
+            <Box sx={{ py: 6, display: "flex", justifyContent: "center" }}>
+              <CircularProgress size={28} />
+            </Box>
+          ) : filteredUsers.length === 0 ? (
+            <Box sx={{ py: 6, textAlign: "center" }}>
+              <GroupOutlined sx={{ fontSize: 40, color: "text.disabled", mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                No users found.
+              </Typography>
+            </Box>
+          ) : (
+            <TableContainer component={Paper} elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>User</TableCell>
+                    <TableCell>Email</TableCell>
+                    <TableCell>Assigned Role</TableCell>
+                    <TableCell align="right">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filteredUsers.map((managedUser) => {
+                    const isSelf = managedUser.id === currentUserId;
 
                     return (
-                      <TableRow
-                        key={managedUser.id}
-                        hover
-                        sx={{
-                          "&:last-child td": {
-                            borderBottom: 0,
-                          },
-                        }}
-                      >
-                        <TableCell
-                          sx={{
-                            py: 2,
-                            minWidth: 220,
-                          }}
-                        >
-                          <Box
-                            sx={{
-                              display: "flex",
-                              alignItems:
-                                "center",
-                              gap: 1.5,
-                            }}
-                          >
+                      <TableRow key={managedUser.id} hover>
+                        {/* USER AVATAR & NAME */}
+                        <TableCell>
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
                             <Avatar
                               sx={{
-                                width: 40,
-                                height: 40,
-                                fontSize: 14,
-                                fontWeight: 800,
+                                width: 34,
+                                height: 34,
                                 background:
-                                  "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)",
+                                  managedUser.role === "ADMIN"
+                                    ? "linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)"
+                                    : "linear-gradient(135deg, #2563eb 0%, #38bdf8 100%)",
+                                fontSize: 13,
+                                fontWeight: 700,
                               }}
                             >
-                              {getInitials(
-                                managedUser.username,
-                              )}
+                              {getInitials(managedUser.username)}
                             </Avatar>
 
-                            <Box
-                              sx={{
-                                minWidth: 0,
-                              }}
-                            >
-                              <Box
-                                sx={{
-                                  display:
-                                    "flex",
-                                  alignItems:
-                                    "center",
-                                  gap: 0.8,
-                                }}
-                              >
-                                <Typography
-                                  variant="body2"
-                                  noWrap
-                                  sx={{
-                                    fontWeight:
-                                      750,
-                                  }}
-                                >
-                                  {
-                                    managedUser.username
-                                  }
+                            <Box>
+                              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                <Typography variant="body2" sx={{ fontWeight: 650 }}>
+                                  {managedUser.username}
                                 </Typography>
-
-                                {isCurrentUser && (
-                                  <Chip
-                                    label="You"
-                                    size="small"
-                                    sx={{
-                                      height: 20,
-                                      fontSize: 10,
-                                      fontWeight: 800,
-                                      backgroundColor:
-                                        "rgba(79, 70, 229, 0.08)",
-                                      color:
-                                        "#4f46e5",
-                                    }}
-                                  />
+                                {isSelf && (
+                                  <Chip label="YOU" size="small" sx={{ height: 18, fontSize: "0.625rem", fontWeight: 700 }} />
                                 )}
                               </Box>
-
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                              >
-                                Organization
-                                member
-                              </Typography>
                             </Box>
                           </Box>
                         </TableCell>
 
-                        <TableCell
-                          sx={{
-                            py: 2,
-                            color: "#475569",
-                          }}
-                        >
-                          <Typography
-                            variant="body2"
-                            noWrap
-                          >
-                            {
-                              managedUser.email
-                            }
+                        {/* EMAIL */}
+                        <TableCell>
+                          <Typography variant="body2" color="text.secondary">
+                            {managedUser.email}
                           </Typography>
                         </TableCell>
 
-                        <TableCell
-                          sx={{ py: 2 }}
-                        >
+                        {/* ROLE CHIP */}
+                        <TableCell>
                           <Chip
-                            icon={getRoleIcon(
-                              userRole,
-                            )}
-                            label={
-                              ROLE_CONFIG[
-                                userRole
-                              ]?.label ??
-                              userRole
-                            }
+                            label={managedUser.role}
                             size="small"
+                            color={
+                              managedUser.role === "ADMIN"
+                                ? "secondary"
+                                : managedUser.role === "VIEWER"
+                                  ? "info"
+                                  : "primary"
+                            }
                             variant="outlined"
-                            sx={{
-                              fontWeight: 700,
-                              borderColor:
-                                roleStyles.borderColor,
-                              color:
-                                roleStyles.color,
-                              backgroundColor:
-                                roleStyles.backgroundColor,
-                              "& .MuiChip-icon":
-                                {
-                                  color:
-                                    roleStyles.color,
-                                },
-                            }}
+                            sx={{ fontWeight: 700, height: 22 }}
                           />
                         </TableCell>
 
-                        <TableCell
-                          align="right"
-                          sx={{ py: 2 }}
-                        >
-                          <Tooltip
-                            title={
-                              isCurrentUser
-                                ? "You cannot modify your own account"
-                                : "User actions"
-                            }
+                        {/* ACTIONS */}
+                        <TableCell align="right">
+                          <IconButton
+                            size="small"
+                            onClick={(e) => handleMenuOpen(e, managedUser)}
                           >
-                            <span>
-                              <IconButton
-                                size="small"
-                                disabled={
-                                  isCurrentUser
-                                }
-                                onClick={(
-                                  event,
-                                ) =>
-                                  handleMenuOpen(
-                                    event,
-                                    managedUser,
-                                  )
-                                }
-                                sx={{
-                                  border:
-                                    "1px solid rgba(15, 23, 42, 0.08)",
-                                  borderRadius: 2,
-                                }}
-                              >
-                                <MoreVert fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
+                            <MoreVert fontSize="small" />
+                          </IconButton>
                         </TableCell>
                       </TableRow>
                     );
-                  },
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-      </Paper>
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </CardContent>
+      </Card>
 
-      {/* ACTION MENU */}
-
+      {/* ROW ACTION MENU */}
       <Menu
         anchorEl={menuAnchorEl}
         open={Boolean(menuAnchorEl)}
         onClose={handleMenuClose}
-        slotProps={{
-          paper: {
-            elevation: 8,
-            sx: {
-              mt: 1,
-              minWidth: 190,
-              borderRadius: 2.5,
-              border:
-                "1px solid rgba(15, 23, 42, 0.08)",
-              boxShadow:
-                "0 14px 35px rgba(15, 23, 42, 0.12)",
-            },
-          },
-        }}
+        slotProps={{ paper: { sx: { borderRadius: 2, minWidth: 160 } } }}
       >
-        <MenuItem
-          onClick={
-            handleOpenRoleDialog
-          }
-          sx={{
-            gap: 1.2,
-            py: 1.2,
-          }}
-        >
-          <EditOutlined
-            fontSize="small"
-            sx={{ color: "#4f46e5" }}
-          />
-
-          Change Role
+        <MenuItem onClick={handleOpenRoleDialog} sx={{ fontSize: "0.85rem" }}>
+          <EditOutlined fontSize="small" sx={{ mr: 1.5, color: "text.secondary" }} />
+          Modify Role
         </MenuItem>
 
-        <Divider />
-
-        <MenuItem
-          onClick={
-            handleOpenDeleteDialog
-          }
-          sx={{
-            gap: 1.2,
-            py: 1.2,
-            color: "#dc2626",
-          }}
-        >
-          <DeleteOutlined fontSize="small" />
-
-          Delete User
-        </MenuItem>
+        {selectedUser?.id !== currentUserId && (
+          <MenuItem
+            onClick={handleOpenDeleteDialog}
+            sx={{ fontSize: "0.85rem", color: "error.main" }}
+          >
+            <DeleteOutlined fontSize="small" sx={{ mr: 1.5 }} />
+            Revoke Access
+          </MenuItem>
+        )}
       </Menu>
 
-      {/* ADD USER DIALOG */}
-
+      {/* PROVISION USER DIALOG */}
       <Dialog
         open={addDialogOpen}
-        onClose={handleCloseAddDialog}
+        onClose={() => !isCreating && setAddDialogOpen(false)}
+        maxWidth="xs"
         fullWidth
-        maxWidth="sm"
-        slotProps={{
-          paper: {
-            sx: {
-              borderRadius: 3,
-              overflow: "hidden",
-            },
-          },
-        }}
       >
-        <DialogTitle
-          sx={{
-            pb: 1,
-            fontWeight: 800,
-          }}
-        >
-          Add New User
-        </DialogTitle>
-
-        <DialogContent>
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{ mb: 3 }}
-          >
-            Create a user account and assign
-            an appropriate access role.
-          </Typography>
-
-          <Stack spacing={2.2}>
+        <DialogTitle sx={{ fontWeight: 800 }}>Provision New User</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2} sx={{ pt: 1 }}>
             <TextField
               fullWidth
+              size="small"
               label="Username"
               value={username}
-              onChange={(event) =>
-                setUsername(
-                  event.target.value,
-                )
-              }
+              onChange={(e) => setUsername(e.target.value)}
               disabled={isCreating}
-              autoComplete="off"
             />
-
             <TextField
               fullWidth
+              size="small"
               label="Email"
               type="email"
               value={email}
-              onChange={(event) =>
-                setEmail(
-                  event.target.value,
-                )
-              }
+              onChange={(e) => setEmail(e.target.value)}
               disabled={isCreating}
-              autoComplete="off"
             />
-
             <TextField
               fullWidth
-              label="Password"
-              type={
-                showPassword
-                  ? "text"
-                  : "password"
-              }
+              size="small"
+              label="Initial Password"
+              type={showPassword ? "text" : "password"}
               value={password}
-              onChange={(event) =>
-                setPassword(
-                  event.target.value,
-                )
-              }
+              onChange={(e) => setPassword(e.target.value)}
               disabled={isCreating}
-              autoComplete="new-password"
-              helperText="Minimum 6 characters"
               slotProps={{
                 input: {
                   endAdornment: (
                     <InputAdornment position="end">
-                      <IconButton
-                        onClick={() =>
-                          setShowPassword(
-                            (current) =>
-                              !current,
-                          )
-                        }
-                        edge="end"
-                        disabled={
-                          isCreating
-                        }
-                        aria-label={
-                          showPassword
-                            ? "Hide password"
-                            : "Show password"
-                        }
-                      >
-                        {showPassword ? (
-                          <VisibilityOff />
-                        ) : (
-                          <Visibility />
-                        )}
+                      <IconButton size="small" onClick={() => setShowPassword((prev) => !prev)}>
+                        {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                       </IconButton>
                     </InputAdornment>
                   ),
                 },
               }}
             />
-
-            <FormControl fullWidth>
-              <InputLabel id="new-user-role-label">
-                Role
-              </InputLabel>
-
+            <FormControl fullWidth size="small">
+              <InputLabel id="role-select-label">Assigned Role</InputLabel>
               <Select
-                labelId="new-user-role-label"
+                labelId="role-select-label"
+                label="Assigned Role"
                 value={role}
-                label="Role"
-                onChange={(event) =>
-                  setRole(
-                    event.target
-                      .value as Role,
-                  )
-                }
+                onChange={(e) => setRole(e.target.value as Role)}
                 disabled={isCreating}
               >
-                {ROLE_OPTIONS.map(
-                  (roleOption) => (
-                    <MenuItem
-                      key={roleOption}
-                      value={roleOption}
-                    >
-                      <Box
-                        sx={{
-                          display: "flex",
-                          alignItems:
-                            "center",
-                          gap: 1.2,
-                        }}
-                      >
-                        {getRoleIcon(
-                          roleOption,
-                        )}
-
-                        <Box>
-                          <Typography
-                            variant="body2"
-                            sx={{
-                              fontWeight:
-                                700,
-                            }}
-                          >
-                            {
-                              ROLE_CONFIG[
-                                roleOption
-                              ].label
-                            }
-                          </Typography>
-
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                          >
-                            {
-                              ROLE_CONFIG[
-                                roleOption
-                              ].description
-                            }
-                          </Typography>
-                        </Box>
-                      </Box>
-                    </MenuItem>
-                  ),
-                )}
+                {ROLE_OPTIONS.map((r) => (
+                  <MenuItem key={r} value={r}>
+                    {ROLE_CONFIG[r].label}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
           </Stack>
         </DialogContent>
-
-        <DialogActions
-          sx={{
-            px: 3,
-            pb: 2.5,
-            gap: 1,
-          }}
-        >
-          <Button
-            onClick={
-              handleCloseAddDialog
-            }
-            disabled={isCreating}
-            sx={{
-              textTransform: "none",
-              fontWeight: 600,
-            }}
-          >
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setAddDialogOpen(false)} disabled={isCreating}>
             Cancel
           </Button>
-
           <Button
             variant="contained"
-            onClick={
-              handleCreateUser
-            }
+            onClick={() => void handleCreateUser()}
             disabled={isCreating}
-            startIcon={
-              isCreating ? (
-                <CircularProgress
-                  size={17}
-                  color="inherit"
-                />
-              ) : (
-                <Add />
-              )
-            }
-            sx={{
-              textTransform: "none",
-              fontWeight: 700,
-              borderRadius: 2,
-              px: 2,
-            }}
+            startIcon={isCreating ? <CircularProgress size={16} color="inherit" /> : <Add />}
           >
-            {isCreating
-              ? "Creating..."
-              : "Create User"}
+            {isCreating ? "Provisioning..." : "Provision User"}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* CHANGE ROLE DIALOG */}
-
+      {/* MODIFY ROLE DIALOG */}
       <Dialog
         open={roleDialogOpen}
-        onClose={
-          handleCloseRoleDialog
-        }
-        fullWidth
+        onClose={() => !isUpdatingRole && setRoleDialogOpen(false)}
         maxWidth="xs"
-        slotProps={{
-          paper: {
-            sx: {
-              borderRadius: 3,
-            },
-          },
-        }}
+        fullWidth
       >
-        <DialogTitle
-          sx={{
-            fontWeight: 800,
-          }}
-        >
-          Change User Role
-        </DialogTitle>
+        <DialogTitle sx={{ fontWeight: 800 }}>Modify Entitlement Role</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Update permissions for <strong>{selectedUser?.username}</strong>.
+          </Typography>
 
-        <DialogContent>
-          {selectedUser && (
-            <>
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 1.5,
-                  mb: 3,
-                  p: 1.5,
-                  borderRadius: 2.5,
-                  backgroundColor:
-                    "#f8fafc",
-                }}
-              >
-                <Avatar
-                  sx={{
-                    width: 42,
-                    height: 42,
-                    fontWeight: 800,
-                    background:
-                      "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)",
-                  }}
-                >
-                  {getInitials(
-                    selectedUser.username,
-                  )}
-                </Avatar>
+          <FormControl fullWidth size="small">
+            <InputLabel id="mod-role-label">Role</InputLabel>
+            <Select
+              labelId="mod-role-label"
+              label="Role"
+              value={selectedRole}
+              onChange={(e) => setSelectedRole(e.target.value as Role)}
+              disabled={isUpdatingRole}
+            >
+              {ROLE_OPTIONS.map((r) => (
+                <MenuItem key={r} value={r}>
+                  {ROLE_CONFIG[r].label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
 
-                <Box>
-                  <Typography
-                    sx={{
-                      fontWeight: 750,
-                    }}
-                  >
-                    {
-                      selectedUser.username
-                    }
-                  </Typography>
-
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                  >
-                    {
-                      selectedUser.email
-                    }
-                  </Typography>
-                </Box>
-              </Box>
-
-              <FormControl fullWidth>
-                <InputLabel id="change-role-label">
-                  Role
-                </InputLabel>
-
-                <Select
-                  labelId="change-role-label"
-                  value={selectedRole}
-                  label="Role"
-                  onChange={(event) =>
-                    setSelectedRole(
-                      event.target
-                        .value as Role,
-                    )
-                  }
-                  disabled={
-                    isUpdatingRole
-                  }
-                >
-                  {ROLE_OPTIONS.map(
-                    (roleOption) => (
-                      <MenuItem
-                        key={roleOption}
-                        value={roleOption}
-                      >
-                        <Box
-                          sx={{
-                            display: "flex",
-                            alignItems:
-                              "center",
-                            gap: 1.2,
-                          }}
-                        >
-                          {getRoleIcon(
-                            roleOption,
-                          )}
-
-                          <Box>
-                            <Typography
-                              variant="body2"
-                              sx={{
-                                fontWeight:
-                                  700,
-                              }}
-                            >
-                              {
-                                ROLE_CONFIG[
-                                  roleOption
-                                ].label
-                              }
-                            </Typography>
-
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                            >
-                              {
-                                ROLE_CONFIG[
-                                  roleOption
-                                ].description
-                              }
-                            </Typography>
-                          </Box>
-                        </Box>
-                      </MenuItem>
-                    ),
-                  )}
-                </Select>
-              </FormControl>
-            </>
-          )}
+          <Box sx={{ mt: 2, p: 1.5, borderRadius: 1.5, bgcolor: "action.hover" }}>
+            <Typography variant="caption" sx={{ fontWeight: 700, color: "text.primary", display: "block" }}>
+              {ROLE_CONFIG[selectedRole].label} Permissions:
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {ROLE_CONFIG[selectedRole].description}
+            </Typography>
+          </Box>
         </DialogContent>
-
-        <DialogActions
-          sx={{
-            px: 3,
-            pb: 2.5,
-            gap: 1,
-          }}
-        >
-          <Button
-            onClick={
-              handleCloseRoleDialog
-            }
-            disabled={isUpdatingRole}
-            sx={{
-              textTransform: "none",
-            }}
-          >
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setRoleDialogOpen(false)} disabled={isUpdatingRole}>
             Cancel
           </Button>
-
           <Button
             variant="contained"
-            onClick={
-              handleUpdateRole
-            }
+            onClick={() => void handleUpdateRole()}
             disabled={isUpdatingRole}
-            startIcon={
-              isUpdatingRole ? (
-                <CircularProgress
-                  size={17}
-                  color="inherit"
-                />
-              ) : (
-                <EditOutlined />
-              )
-            }
-            sx={{
-              textTransform: "none",
-              fontWeight: 700,
-              borderRadius: 2,
-            }}
           >
-            {isUpdatingRole
-              ? "Updating..."
-              : "Update Role"}
+            {isUpdatingRole ? "Updating..." : "Save Role"}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* DELETE DIALOG */}
-
+      {/* DELETE USER CONFIRMATION */}
       <Dialog
         open={deleteDialogOpen}
-        onClose={
-          handleCloseDeleteDialog
-        }
-        fullWidth
+        onClose={() => !isDeleting && setDeleteDialogOpen(false)}
         maxWidth="xs"
-        slotProps={{
-          paper: {
-            sx: {
-              borderRadius: 3,
-            },
-          },
-        }}
+        fullWidth
       >
-        <DialogTitle
-          sx={{
-            fontWeight: 800,
-          }}
-        >
-          Delete User?
-        </DialogTitle>
-
+        <DialogTitle sx={{ fontWeight: 800 }}>Revoke User Access?</DialogTitle>
         <DialogContent>
-          <Typography
-            variant="body2"
-            color="text.secondary"
-          >
-            Are you sure you want to delete{" "}
-            <Box
-              component="span"
-              sx={{
-                fontWeight: 800,
-                color: "#0f172a",
-              }}
-            >
-              {selectedUser?.username}
-            </Box>
-            ? This action cannot be undone.
+          <Typography variant="body2">
+            Are you sure you want to revoke access for <strong>{selectedUser?.username}</strong>?
+            This user will no longer be able to log in to this tenant partition.
           </Typography>
         </DialogContent>
-
-        <DialogActions
-          sx={{
-            px: 3,
-            pb: 2.5,
-            gap: 1,
-          }}
-        >
-          <Button
-            onClick={
-              handleCloseDeleteDialog
-            }
-            disabled={isDeleting}
-            sx={{
-              textTransform: "none",
-            }}
-          >
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={isDeleting}>
             Cancel
           </Button>
-
           <Button
-            variant="contained"
             color="error"
-            onClick={
-              handleDeleteUser
-            }
+            variant="contained"
+            onClick={() => void handleDeleteUser()}
             disabled={isDeleting}
-            startIcon={
-              isDeleting ? (
-                <CircularProgress
-                  size={17}
-                  color="inherit"
-                />
-              ) : (
-                <DeleteOutlined />
-              )
-            }
-            sx={{
-              textTransform: "none",
-              fontWeight: 700,
-              borderRadius: 2,
-            }}
           >
-            {isDeleting
-              ? "Deleting..."
-              : "Delete User"}
+            {isDeleting ? "Revoking..." : "Revoke Access"}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* SUCCESS SNACKBAR */}
-
+      {/* SNACKBAR */}
       <Snackbar
         open={snackbarOpen}
         autoHideDuration={4000}
-        onClose={
-          handleSnackbarClose
-        }
-        anchorOrigin={{
-          vertical: "bottom",
-          horizontal: "right",
-        }}
-      >
-        <Alert
-          onClose={
-            handleSnackbarClose
-          }
-          severity="success"
-          variant="filled"
-          sx={{
-            borderRadius: 2,
-          }}
-        >
-          {successMessage}
-        </Alert>
-      </Snackbar>
-    </Box>
+        onClose={() => setSnackbarOpen(false)}
+        message={successMessage}
+      />
+    </Stack>
   );
 }

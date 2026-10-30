@@ -11,7 +11,7 @@ const STORAGE_KEY = "ragentis_appearance";
 export const defaultAppearanceSettings: AppearanceSettings = {
   compact: false,
   animations: true,
-  theme: "light",
+  theme: "dark",
 };
 
 export const getAppearanceSettings =

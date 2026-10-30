@@ -1,1541 +1,500 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type KeyboardEvent,
-} from "react";
-
-import {
-  Alert,
-  Avatar,
-  Box,
-  Button,
-  CircularProgress,
-  Divider,
-  IconButton,
-  List,
-  ListItemButton,
-  ListItemText,
-  Paper,
-  TextField,
-  Tooltip,
-  Typography,
-} from "@mui/material";
-
-import SmartToyOutlinedIcon from "@mui/icons-material/SmartToyOutlined";
-import SendRoundedIcon from "@mui/icons-material/SendRounded";
-import AddRoundedIcon from "@mui/icons-material/AddRounded";
-import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
-import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
-import AutoAwesomeOutlinedIcon from "@mui/icons-material/AutoAwesomeOutlined";
-import PersonOutlineRoundedIcon from "@mui/icons-material/PersonOutlineRounded";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Box, Button, Drawer, IconButton, Tooltip, Typography } from "@mui/material";
+import ViewSidebarOutlinedIcon from "@mui/icons-material/ViewSidebarOutlined";
+import EditNoteRoundedIcon from "@mui/icons-material/EditNoteRounded";
 import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
-import ChatBubbleOutlineRoundedIcon from "@mui/icons-material/ChatBubbleOutlineRounded";
-import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
+import ReplayRoundedIcon from "@mui/icons-material/ReplayRounded";
+import KeyboardArrowDownRoundedIcon from "@mui/icons-material/KeyboardArrowDownRounded";
 
-import {
-  queryDocuments,
-  type QuerySource,
-} from "../api/query.api";
+import { useLocation, useNavigate } from "react-router-dom";
 
+import { useAuth } from "../auth/AuthContext";
+import { queryDocuments, type QuerySource } from "../api/query.api";
 import {
-  getConversations,
-  getConversation,
   deleteConversation,
+  getConversation,
+  getConversations,
   type Conversation,
 } from "../api/conversation.api";
+import { getDocuments, type DocumentItem } from "../api/documents.api";
+import { getRAGSettings } from "../api/ragsettings.api";
+import { getLicenseStatus } from "../api/license.api";
+import { useSystemStatus } from "../hooks/useSystemStatus";
+import { toast } from "../components/common/Toast";
+import { getApiErrorMessage, getTimestamp } from "../utils/format";
 
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  sources?: QuerySource[];
+import ConversationList from "../components/workspace/ConversationList";
+import MessageItem from "../components/workspace/MessageItem";
+import ThinkingTurn from "../components/workspace/ThinkingTurn";
+import Composer from "../components/workspace/Composer";
+import WorkspaceIntro from "../components/workspace/WorkspaceIntro";
+import { EvidenceDrawer } from "../components/workspace/Sources";
+import type { ChatMessage } from "../components/workspace/types";
+
+const HISTORY_KEY = "ragentis_workspace_history_open";
+
+interface NavState {
+  prefill?: string;
+  autoSubmit?: boolean;
+  conversationId?: string;
 }
 
-/* =========================================================
-   HELPERS
-   ========================================================= */
+interface FailedTurn {
+  question: string;
+  message: string;
+}
 
-const createMessageId = (): string => {
-  return `${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}`;
-};
+const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-const hasQueryText = (value: string): boolean => {
-  return value.trim().length > 0;
-};
-
-/* =========================================================
-   SOURCE HELPERS
-   ========================================================= */
-
-const getSourceFilename = (
-  source: QuerySource,
-): string => {
-  const filename: unknown =
-    source.filename ??
-    source.file_name ??
-    source.document_name ??
-    source.name;
-
-  if (
-    typeof filename === "string" &&
-    filename.trim().length > 0
-  ) {
-    return filename.trim();
-  }
-
-  return "Document source";
-};
-
-const getSourcePage = (
-  source: QuerySource,
-): string | null => {
-  const possiblePageValues: unknown[] = [
-    source.page,
-    source.page_number,
-    source.pageNumber,
-    source.metadata &&
-    typeof source.metadata === "object"
-      ? (source.metadata as Record<string, unknown>)
-          .page
-      : undefined,
-    source.metadata &&
-    typeof source.metadata === "object"
-      ? (source.metadata as Record<string, unknown>)
-          .page_number
-      : undefined,
-    source.metadata &&
-    typeof source.metadata === "object"
-      ? (source.metadata as Record<string, unknown>)
-          .pageNumber
-      : undefined,
-  ];
-
-  for (const pageValue of possiblePageValues) {
-    if (typeof pageValue === "number") {
-      return `Page ${pageValue}`;
-    }
-
-    if (typeof pageValue === "string") {
-      const trimmedPage = pageValue.trim();
-
-      if (trimmedPage.length > 0) {
-        return `Page ${trimmedPage}`;
-      }
-    }
-  }
-
-  return null;
-};
-
-/* =========================================================
-   UNIQUE SOURCE
-   ========================================================= */
-
-const getUniqueSources = (
-  sources: QuerySource[],
-): QuerySource[] => {
-  const seenDocuments = new Set<string>();
-
-  return sources.filter((source) => {
-    const filename = getSourceFilename(source);
-
-    const normalizedFilename =
-      filename.toLowerCase().trim();
-
-    if (seenDocuments.has(normalizedFilename)) {
-      return false;
-    }
-
-    seenDocuments.add(normalizedFilename);
-
+const readHistoryOpen = () => {
+  try {
+    return localStorage.getItem(HISTORY_KEY) !== "0";
+  } catch {
     return true;
-  });
+  }
 };
-
-/* =========================================================
-   AI WORKSPACE
-   ========================================================= */
 
 export default function AIWorkspace() {
-  const [messages, setMessages] = useState<ChatMessage[]>(
-    [],
-  );
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const system = useSystemStatus();
+  const role = user?.role?.toUpperCase();
+  const canUpload = role === "ADMIN" || role === "USER";
 
-  const [query, setQuery] = useState<string>("");
+  /* ---------------- state ---------------- */
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [query, setQuery] = useState("");
+  const [isAsking, setIsAsking] = useState(false);
+  const [failed, setFailed] = useState<FailedTurn | null>(null);
 
-  const [isLoading, setIsLoading] =
-    useState<boolean>(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationsLoading, setConversationsLoading] = useState(true);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [loadingConversation, setLoadingConversation] = useState(false);
 
-  const [error, setError] = useState<string>("");
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(true);
+  const [citationsEnabled, setCitationsEnabled] = useState<boolean | null>(null);
+  const [licenseBlocked, setLicenseBlocked] = useState(false);
 
-  const [conversations, setConversations] =
-    useState<Conversation[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(readHistoryOpen);
+  const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
+  const [evidence, setEvidence] = useState<{ sources: QuerySource[]; index: number } | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
 
-  const [conversationId, setConversationId] =
-    useState<string | null>(null);
+  const [atBottom, setAtBottom] = useState(true);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const handledNavKey = useRef<string | null>(null);
 
-  const [isHistoryLoading, setIsHistoryLoading] =
-    useState<boolean>(true);
+  const modelName = system.status?.model;
+  const hasThread = messages.length > 0 || isAsking;
 
-  const [isLoadingConversation, setIsLoadingConversation] =
-    useState<boolean>(false);
-
-  const [historyOpen, setHistoryOpen] =
-    useState<boolean>(true);
-
-  const inputRef =
-    useRef<HTMLInputElement | null>(null);
-
-  const hasMessages: boolean = messages.length > 0;
-
-  /* =======================================================
-     LOAD CONVERSATIONS
-     ======================================================= */
-
-  const loadConversations = useCallback(
-    async (): Promise<void> => {
-      try {
-        setIsHistoryLoading(true);
-
-        const data = await getConversations();
-
-        setConversations(data);
-      } catch (err: unknown) {
-        console.error(
-          "Failed to load conversations:",
-          err,
-        );
-      } finally {
-        setIsHistoryLoading(false);
-      }
-    },
-    [],
-  );
+  /* ---------------- loaders ---------------- */
+  const loadConversations = useCallback(async (silent = false) => {
+    if (!silent) setConversationsLoading(true);
+    try {
+      setConversations(await getConversations());
+    } catch (err) {
+      if (!silent) toast.error(getApiErrorMessage(err, "Couldn't load conversations."));
+    } finally {
+      setConversationsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     void loadConversations();
+
+    getDocuments()
+      .then(setDocuments)
+      .catch(() => setDocuments([]))
+      .finally(() => setDocumentsLoading(false));
+
+    getRAGSettings()
+      .then((s) => setCitationsEnabled(s.source_attribution))
+      .catch(() => setCitationsEnabled(null));
+
+    getLicenseStatus()
+      .then((s) => {
+        const lic = s.license;
+        const valid = Boolean(s.licensed && lic?.is_active && getTimestamp(lic.expires_at) > Date.now());
+        setLicenseBlocked(!valid);
+      })
+      .catch(() => setLicenseBlocked(false)); // let the API decide
   }, [loadConversations]);
 
-  /* =======================================================
-     NEW CHAT
-     ======================================================= */
+  /* ---------------- scrolling ---------------- */
+  const scrollToBottom = useCallback((smooth = true) => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+  }, []);
 
-  const handleNewChat = (): void => {
+  useLayoutEffect(() => {
+    if (atBottom) scrollToBottom(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length, isAsking, failed]);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+  };
+
+  const focusInput = () => window.setTimeout(() => inputRef.current?.focus(), 60);
+
+  /* ---------------- actions ---------------- */
+  const ask = useCallback(
+    async (question: string, options: { retry?: boolean } = {}) => {
+      const text = question.trim();
+      if (!text || isAsking) return;
+
+      setFailed(null);
+      if (!options.retry) {
+        setMessages((current) => [
+          ...current,
+          { id: newId(), role: "user", content: text, createdAt: new Date().toISOString(), fresh: true },
+        ]);
+        setQuery("");
+      }
+      setAtBottom(true);
+      setIsAsking(true);
+
+      try {
+        const response = await queryDocuments(text, conversationId ?? undefined);
+        setConversationId(response.conversation_id);
+        setMessages((current) => [
+          ...current,
+          {
+            id: newId(),
+            role: "assistant",
+            content: response.answer,
+            sources: response.sources ?? [],
+            createdAt: new Date().toISOString(),
+            fresh: true,
+          },
+        ]);
+        void loadConversations(true);
+      } catch (err) {
+        const message = getApiErrorMessage(
+          err,
+          "The question couldn't be answered. Check that Ollama is running and try again.",
+        );
+        setFailed({ question: text, message });
+      } finally {
+        setIsAsking(false);
+        focusInput();
+      }
+    },
+    [conversationId, isAsking, loadConversations],
+  );
+
+  const startNewConversation = useCallback(() => {
     setMessages([]);
     setQuery("");
-    setError("");
+    setFailed(null);
     setConversationId(null);
+    setEvidenceOpen(false);
+    setMobileHistoryOpen(false);
+    focusInput();
+  }, []);
 
-    window.setTimeout(() => {
-      inputRef.current?.focus();
-    }, 50);
-  };
+  const openConversation = useCallback(
+    async (id: string) => {
+      if (isAsking || loadingConversation) return;
+      setMobileHistoryOpen(false);
+      if (id === conversationId) return;
 
-  /* =======================================================
-     LOAD EXISTING CONVERSATION
-     ======================================================= */
+      setLoadingConversation(true);
+      setFailed(null);
+      try {
+        const detail = await getConversation(id);
+        const ordered = [...detail.messages].sort(
+          (a, b) => getTimestamp(a.created_at) - getTimestamp(b.created_at),
+        );
+        setConversationId(detail.id);
+        setMessages(
+          ordered.map((m) => ({
+            id: m.id,
+            role: m.role === "user" ? "user" : "assistant",
+            content: m.content,
+            createdAt: m.created_at,
+            sources: [],
+            fromHistory: true,
+          })),
+        );
+        setAtBottom(true);
+        window.setTimeout(() => scrollToBottom(false), 30);
+      } catch (err) {
+        toast.error(getApiErrorMessage(err, "Couldn't open that conversation."));
+      } finally {
+        setLoadingConversation(false);
+      }
+    },
+    [conversationId, isAsking, loadingConversation, scrollToBottom],
+  );
 
-  const handleLoadConversation = async (
-    id: string,
-  ): Promise<void> => {
-    if (
-      isLoading ||
-      isLoadingConversation
-    ) {
-      return;
-    }
-
-    try {
-      setIsLoadingConversation(true);
-      setError("");
-
-      const conversation =
-        await getConversation(id);
-
-      const loadedMessages: ChatMessage[] =
-        conversation.messages.map((message) => ({
-          id: message.id,
-          role:
-            message.role === "user"
-              ? "user"
-              : "assistant",
-          content: message.content,
-          sources: [],
-        }));
-
-      setConversationId(conversation.id);
-      setMessages(loadedMessages);
-      setQuery("");
-
-      window.setTimeout(() => {
-        inputRef.current?.focus();
-      }, 50);
-    } catch (err: unknown) {
-      console.error(
-        "Failed to load conversation:",
-        err,
-      );
-
-      setError(
-        "Unable to load this conversation. Please try again.",
-      );
-    } finally {
-      setIsLoadingConversation(false);
-    }
-  };
-
-  /* =======================================================
-     DELETE CONVERSATION
-     ======================================================= */
-
-  const handleDeleteConversation = async (
-    id: string,
-  ): Promise<void> => {
+  const removeConversation = async (id: string) => {
     try {
       await deleteConversation(id);
-
-      setConversations((current) =>
-        current.filter(
-          (conversation) =>
-            conversation.id !== id,
-        ),
-      );
-
-      if (conversationId === id) {
-        handleNewChat();
-      }
-    } catch (err: unknown) {
-      console.error(
-        "Failed to delete conversation:",
-        err,
-      );
-
-      setError(
-        "Unable to delete the conversation. Please try again.",
-      );
+      setConversations((current) => current.filter((c) => c.id !== id));
+      if (id === conversationId) startNewConversation();
+      toast.success("Conversation deleted");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Couldn't delete the conversation."));
     }
   };
 
-  /* =======================================================
-     SEND QUERY
-     ======================================================= */
-
-  const handleSubmit = async (
-    event?: FormEvent<HTMLFormElement>,
-  ): Promise<void> => {
-    event?.preventDefault();
-
-    const trimmedQuery: string = query.trim();
-
-    if (!hasQueryText(query) || isLoading) {
+  const toggleHistory = () => {
+    if (window.matchMedia("(max-width: 899.95px)").matches) {
+      setMobileHistoryOpen(true);
       return;
     }
-
-    const userMessage: ChatMessage = {
-      id: createMessageId(),
-      role: "user",
-      content: trimmedQuery,
-    };
-
-    setMessages((current) => [
-      ...current,
-      userMessage,
-    ]);
-
-    setQuery("");
-    setError("");
-    setIsLoading(true);
-
-    try {
-      /*
-       * For a new chat, conversationId is null.
-       * Backend creates the conversation.
-       *
-       * For an existing chat, the same ID is
-       * sent so the conversation continues.
-       */
-
-      const response = await queryDocuments(
-        trimmedQuery,
-        conversationId ?? undefined,
-      );
-
-      /*
-       * Store the backend-generated conversation ID.
-       * This is important after the first message
-       * of a new conversation.
-       */
-
-      setConversationId(
-        response.conversation_id,
-      );
-
-      const assistantMessage: ChatMessage = {
-        id: createMessageId(),
-        role: "assistant",
-        content: response.answer,
-        sources: response.sources ?? [],
-      };
-
-      setMessages((current) => [
-        ...current,
-        assistantMessage,
-      ]);
-
-      /*
-       * Refresh the sidebar so the latest
-       * conversation appears immediately.
-       */
-
-      await loadConversations();
-    } catch (err: unknown) {
-      console.error(
-        "RAG query failed:",
-        err,
-      );
-
-      setError(
-        "Unable to process your question. Please check the backend connection and try again.",
-      );
-    } finally {
-      setIsLoading(false);
-
-      window.setTimeout(() => {
-        inputRef.current?.focus();
-      }, 50);
-    }
+    setHistoryOpen((open) => {
+      try {
+        localStorage.setItem(HISTORY_KEY, open ? "0" : "1");
+      } catch {
+        /* ignore */
+      }
+      return !open;
+    });
   };
 
-  /* =======================================================
-     ENTER KEY
-     ======================================================= */
+  /* ---------------- navigation state (from dashboard / palette) ---------------- */
+  useEffect(() => {
+    if (handledNavKey.current === location.key) return;
+    handledNavKey.current = location.key;
+    const state = (location.state ?? {}) as NavState;
+    if (!state.prefill && !state.conversationId) return;
+    navigate(location.pathname, { replace: true, state: null });
 
-  const handleKeyDown = (
-    event: KeyboardEvent<HTMLInputElement>,
-  ): void => {
-    if (
-      event.key === "Enter" &&
-      !event.shiftKey
-    ) {
-      event.preventDefault();
-      void handleSubmit();
+    if (state.conversationId) {
+      void openConversation(state.conversationId);
+    } else if (state.prefill) {
+      if (state.autoSubmit) void ask(state.prefill);
+      else {
+        setQuery(state.prefill);
+        focusInput();
+      }
     }
-  };
+  }, [location.key, location.state, location.pathname, navigate, ask, openConversation]);
 
-  /* =========================================================
-     RENDER
-     ========================================================= */
+  const firstQuestion = messages.find((m) => m.role === "user")?.content;
+  const activeTitle =
+    conversations.find((c) => c.id === conversationId)?.title ??
+    (firstQuestion ? firstQuestion.slice(0, 60) : "New conversation");
 
+  const historyPanel = (
+    <ConversationList
+      conversations={conversations}
+      loading={conversationsLoading}
+      activeId={conversationId}
+      disabled={isAsking || loadingConversation}
+      onSelect={(id) => void openConversation(id)}
+      onDelete={(id) => void removeConversation(id)}
+      onNew={startNewConversation}
+    />
+  );
+
+  /* ---------------- render ---------------- */
   return (
     <Box
-      sx={{
-        height: "calc(100vh - 64px)",
-        minHeight: 620,
+      sx={(theme) => ({
+        height: "100%",
         display: "flex",
-        flexDirection: "column",
-        bgcolor: "background.default",
+        borderRadius: "16px",
         overflow: "hidden",
-      }}
+        border: `1px solid ${theme.palette.rag.line}`,
+        bgcolor: theme.palette.rag.surfaceGlass,
+        backdropFilter: "blur(10px)",
+        boxShadow: theme.palette.rag.shadow,
+      })}
     >
-      {/* =====================================================
-          HEADER
-          ===================================================== */}
-
+      {/* History — desktop */}
       <Box
-        sx={{
-          px: { xs: 2, md: 3 },
-          py: 2,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          borderBottom: "1px solid",
-          borderColor: "divider",
-          bgcolor: "background.paper",
+        sx={(theme) => ({
+          display: { xs: "none", md: "block" },
+          width: historyOpen ? 272 : 0,
           flexShrink: 0,
-        }}
+          overflow: "hidden",
+          borderRight: historyOpen ? `1px solid ${theme.palette.rag.line}` : "none",
+          bgcolor: theme.palette.rag.surface,
+          transition: "width 260ms cubic-bezier(0.16, 1, 0.3, 1)",
+        })}
       >
+        <Box sx={{ width: 272, height: "100%" }}>{historyPanel}</Box>
+      </Box>
+
+      {/* History — mobile */}
+      <Drawer
+        open={mobileHistoryOpen}
+        onClose={() => setMobileHistoryOpen(false)}
+        sx={{ display: { md: "none" } }}
+        slotProps={{ paper: { sx: { width: 290 } } }}
+      >
+        {historyPanel}
+      </Drawer>
+
+      {/* Thread */}
+      <Box sx={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", position: "relative" }}>
+        {/* Thread header */}
         <Box
-          sx={{
+          sx={(theme) => ({
+            height: 52,
+            flexShrink: 0,
             display: "flex",
             alignItems: "center",
-            gap: 1.5,
-          }}
+            gap: 1,
+            px: 1.25,
+            borderBottom: `1px solid ${theme.palette.rag.line}`,
+          })}
         >
-          {/* Mobile history button */}
-
-          <IconButton
-            onClick={() =>
-              setHistoryOpen(
-                (current) => !current,
-              )
-            }
-            sx={{
-              display: {
-                xs: "inline-flex",
-                md: "none",
-              },
-              border: "1px solid",
-              borderColor: "divider",
-            }}
-          >
-            <MenuRoundedIcon />
-          </IconButton>
-
-          <Box
-            sx={{
-              width: 42,
-              height: 42,
-              borderRadius: 1.5,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              bgcolor: "primary.main",
-              color: "primary.contrastText",
-            }}
-          >
-            <SmartToyOutlinedIcon />
-          </Box>
-
-          <Box>
-            <Typography
-              variant="h6"
-              sx={{
-                fontWeight: 700,
-                lineHeight: 1.2,
-              }}
-            >
-              AI Workspace
-            </Typography>
-
-            <Typography
-              variant="caption"
-              color="text.secondary"
-            >
-              Query your knowledge with RAGENTIS
-            </Typography>
-          </Box>
-        </Box>
-
-        {/* Desktop New Chat */}
-
-        <Tooltip title="Start a new conversation">
-          <Button
-            variant="outlined"
-            startIcon={<AddRoundedIcon />}
-            onClick={handleNewChat}
-            sx={{
-              borderRadius: 2,
-              textTransform: "none",
-              fontWeight: 600,
-              display: {
-                xs: "none",
-                sm: "inline-flex",
-              },
-            }}
-          >
-            New Chat
-          </Button>
-        </Tooltip>
-
-        {/* Mobile New Chat */}
-
-        <Tooltip title="Start a new conversation">
-          <IconButton
-            onClick={handleNewChat}
-            sx={{
-              display: {
-                xs: "inline-flex",
-                sm: "none",
-              },
-              border: "1px solid",
-              borderColor: "divider",
-            }}
-          >
-            <AddRoundedIcon />
-          </IconButton>
-        </Tooltip>
-      </Box>
-
-      {/* =====================================================
-          WORKSPACE
-          ===================================================== */}
-
-      <Box
-        sx={{
-          flex: 1,
-          minHeight: 0,
-          display: "flex",
-          position: "relative",
-        }}
-      >
-        {/* ===================================================
-            CONVERSATION SIDEBAR
-            =================================================== */}
-
-        <Box
-          sx={{
-            width: 280,
-            flexShrink: 0,
-            borderRight: "1px solid",
-            borderColor: "divider",
-            bgcolor: "background.paper",
-            display: {
-              xs: historyOpen
-                ? "flex"
-                : "none",
-              md: "flex",
-            },
-            flexDirection: "column",
-            position: {
-              xs: "absolute",
-              md: "relative",
-            },
-            zIndex: {
-              xs: 10,
-              md: "auto",
-            },
-            height: "100%",
-            boxShadow: {
-              xs: historyOpen
-                ? "8px 0 30px rgba(0,0,0,0.08)"
-                : "none",
-              md: "none",
-            },
-          }}
-        >
-          {/* Sidebar header */}
-
-          <Box
-            sx={{
-              px: 2,
-              py: 1.75,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 1,
-              }}
-            >
-              <ChatBubbleOutlineRoundedIcon
-                sx={{
-                  fontSize: 19,
-                  color: "primary.main",
-                }}
-              />
-
-              <Typography
-                variant="subtitle2"
-                sx={{
-                  fontWeight: 700,
-                }}
-              >
-                Conversations
-              </Typography>
-            </Box>
-
-            <Tooltip title="New Chat">
-              <IconButton
-                size="small"
-                onClick={handleNewChat}
-              >
-                <AddRoundedIcon fontSize="small" />
+          <Tooltip title={historyOpen ? "Hide conversations" : "Show conversations"}>
+            <IconButton size="small" onClick={toggleHistory} aria-label="Toggle conversation history">
+              <ViewSidebarOutlinedIcon sx={{ fontSize: 19, transform: "scaleX(-1)" }} />
+            </IconButton>
+          </Tooltip>
+          <Typography noWrap sx={{ flex: 1, fontSize: "0.875rem", fontWeight: 560 }}>
+            {loadingConversation ? "Opening conversation…" : activeTitle}
+          </Typography>
+          {hasThread && (
+            <Tooltip title="New conversation">
+              <IconButton size="small" onClick={startNewConversation} aria-label="New conversation">
+                <EditNoteRoundedIcon sx={{ fontSize: 20 }} />
               </IconButton>
             </Tooltip>
-          </Box>
-
-          <Divider />
-
-          {/* Conversation list */}
-
-          <Box
-            sx={{
-              flex: 1,
-              minHeight: 0,
-              overflowY: "auto",
-              px: 1,
-              py: 1,
-            }}
-          >
-            {isHistoryLoading ? (
-              <Box
-                sx={{
-                  display: "flex",
-                  justifyContent: "center",
-                  py: 4,
-                }}
-              >
-                <CircularProgress size={22} />
-              </Box>
-            ) : conversations.length === 0 ? (
-              <Box
-                sx={{
-                  px: 1.5,
-                  py: 5,
-                  textAlign: "center",
-                }}
-              >
-                <ChatBubbleOutlineRoundedIcon
-                  sx={{
-                    fontSize: 30,
-                    color: "text.disabled",
-                    mb: 1,
-                  }}
-                />
-
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                >
-                  No conversations yet
-                </Typography>
-
-                <Typography
-                  variant="caption"
-                  color="text.disabled"
-                  sx={{
-                    display: "block",
-                    mt: 0.5,
-                  }}
-                >
-                  Start asking questions to
-                  create your first chat.
-                </Typography>
-              </Box>
-            ) : (
-              <List
-                disablePadding
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 0.5,
-                }}
-              >
-                {conversations.map(
-                  (conversation) => {
-                    const isActive =
-                      conversation.id ===
-                      conversationId;
-
-                    return (
-                      <ListItemButton
-                        key={conversation.id}
-                        selected={isActive}
-                        onClick={() => {
-                          void handleLoadConversation(
-                            conversation.id,
-                          );
-
-                          if (
-                            window.innerWidth <
-                            900
-                          ) {
-                            setHistoryOpen(
-                              false,
-                            );
-                          }
-                        }}
-                        sx={{
-                          borderRadius: 2,
-                          px: 1.25,
-                          py: 1,
-                          alignItems:
-                            "flex-start",
-
-                          "&.Mui-selected": {
-                            bgcolor:
-                              "action.selected",
-                          },
-
-                          "&.Mui-selected:hover": {
-                            bgcolor:
-                              "action.selected",
-                          },
-                        }}
-                      >
-                        <ChatBubbleOutlineRoundedIcon
-                          sx={{
-                            fontSize: 18,
-                            mt: 0.25,
-                            mr: 1,
-                            color:
-                              isActive
-                                ? "primary.main"
-                                : "text.secondary",
-                          }}
-                        />
-
-                       <ListItemText
-  primary={
-    <Typography
-      variant="body2"
-      noWrap
-      sx={{
-        display: "block",
-        fontWeight: isActive ? 700 : 500,
-      }}
-    >
-      {conversation.title}
-    </Typography>
-  }
-  sx={{
-    minWidth: 0,
-    mr: 0.5,
-  }}
-/>
-
-                        <Tooltip title="Delete">
-                          <IconButton
-                            size="small"
-                            onClick={(
-                              event,
-                            ) => {
-                              event.stopPropagation();
-
-                              void handleDeleteConversation(
-                                conversation.id,
-                              );
-                            }}
-                            sx={{
-                              opacity: 0.55,
-
-                              "&:hover": {
-                                opacity: 1,
-                                color:
-                                  "error.main",
-                              },
-                            }}
-                          >
-                            <DeleteOutlineRoundedIcon
-                              sx={{
-                                fontSize: 17,
-                              }}
-                            />
-                          </IconButton>
-                        </Tooltip>
-                      </ListItemButton>
-                    );
-                  },
-                )}
-              </List>
-            )}
-          </Box>
+          )}
         </Box>
 
-        {/* ===================================================
-            MOBILE SIDEBAR OVERLAY
-            =================================================== */}
-
-        {historyOpen && (
-          <Box
-            onClick={() =>
-              setHistoryOpen(false)
-            }
-            sx={{
-              display: {
-                xs: "block",
-                md: "none",
-              },
-              position: "absolute",
-              inset: 0,
-              bgcolor:
-                "rgba(0,0,0,0.18)",
-              zIndex: 5,
-            }}
-          />
-        )}
-
-        {/* ===================================================
-            CHAT AREA
-            =================================================== */}
-
+        {/* Messages */}
         <Box
+          ref={scrollRef}
+          onScroll={handleScroll}
           sx={{
             flex: 1,
-            minWidth: 0,
             minHeight: 0,
-            display: "flex",
-            flexDirection: "column",
+            overflowY: "auto",
+            opacity: loadingConversation ? 0.45 : 1,
+            transition: "opacity 200ms ease",
           }}
         >
-          {!hasMessages ? (
-            /* ===============================================
-               EMPTY STATE
-               =============================================== */
-
-            <Box
-              sx={{
-                flex: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                px: 2,
-                overflowY: "auto",
-              }}
-            >
-              <Box
-                sx={{
-                  width: "100%",
-                  maxWidth: 760,
-                  textAlign: "center",
-                  py: 5,
-                }}
-              >
-                <Box
-                  sx={{
-                    width: 76,
-                    height: 76,
-                    mx: "auto",
-                    mb: 3,
-                    borderRadius: "24px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background:
-                      "linear-gradient(135deg, rgba(25,118,210,0.14), rgba(103,58,183,0.12))",
-                    border: "1px solid",
-                    borderColor: "divider",
-                    boxShadow:
-                      "0 12px 40px rgba(25,118,210,0.10)",
-                  }}
-                >
-                  <AutoAwesomeOutlinedIcon
-                    sx={{
-                      fontSize: 36,
-                      color: "primary.main",
-                    }}
-                  />
-                </Box>
-
-                <Typography
-                  variant="h4"
-                  sx={{
-                    fontWeight: 750,
-                    mb: 1,
-                    letterSpacing:
-                      "-0.02em",
-                  }}
-                >
-                  Ask your knowledge
-                </Typography>
-
-                <Typography
-                  color="text.secondary"
-                  sx={{
-                    maxWidth: 560,
-                    mx: "auto",
-                    lineHeight: 1.7,
-                  }}
-                >
-                  Ask questions about your
-                  uploaded documents.
-                  RAGENTIS retrieves relevant
-                  context and generates an
-                  answer grounded in your
-                  knowledge base.
-                </Typography>
-
-                <Box
-                  sx={{
-                    mt: 3,
-                    display: "flex",
-                    flexDirection: {
-                      xs: "column",
-                      sm: "row",
-                    },
-                    alignItems: "center",
-                    justifyContent:
-                      "center",
-                    gap: 1,
-                  }}
-                >
-                  {[
-                    "Summarize a document",
-                    "Find key objectives",
-                    "Explain a concept",
-                  ].map(
-                    (suggestion: string) => (
-                      <Button
-                        key={suggestion}
-                        variant="outlined"
-                        onClick={() => {
-                          setQuery(
-                            suggestion,
-                          );
-
-                          inputRef.current?.focus();
-                        }}
-                        sx={{
-                          borderRadius: 3,
-                          textTransform:
-                            "none",
-                          color:
-                            "text.secondary",
-                          borderColor:
-                            "divider",
-                        }}
-                      >
-                        {suggestion}
-                      </Button>
-                    ),
-                  )}
-                </Box>
-              </Box>
-            </Box>
+          {!hasThread ? (
+            <WorkspaceIntro
+              documents={documents}
+              loading={documentsLoading}
+              canUpload={canUpload}
+              onAsk={(q) => void ask(q)}
+              onUpload={() => navigate("/documents", { state: { openUpload: true } })}
+            />
           ) : (
-            /* ===============================================
-               CONVERSATION
-               =============================================== */
-
             <Box
               sx={{
-                flex: 1,
-                minHeight: 0,
-                overflowY: "auto",
-                px: {
-                  xs: 1.5,
-                  md: 3,
-                },
-                py: 3,
-              }}
-            >
-              <Box
-                sx={{
-                  maxWidth: 900,
-                  mx: "auto",
-                }}
-              >
-                <Box
-                  sx={{
-                    display: "flex",
-                    flexDirection:
-                      "column",
-                    gap: 3,
-                  }}
-                >
-                  {messages.map(
-                    (message) => {
-                      const isUser =
-                        message.role ===
-                        "user";
-
-                      return (
-                        <Box
-                          key={message.id}
-                          sx={{
-                            display:
-                              "flex",
-                            gap: 1.5,
-                            alignItems:
-                              "flex-start",
-                            flexDirection:
-                              isUser
-                                ? "row-reverse"
-                                : "row",
-                          }}
-                        >
-                          <Avatar
-                            sx={{
-                              width: 34,
-                              height: 34,
-                              flexShrink: 0,
-                              bgcolor:
-                                isUser
-                                  ? "action.selected"
-                                  : "primary.main",
-                              color:
-                                isUser
-                                  ? "text.primary"
-                                  : "primary.contrastText",
-                            }}
-                          >
-                            {isUser ? (
-                              <PersonOutlineRoundedIcon fontSize="small" />
-                            ) : (
-                              <SmartToyOutlinedIcon fontSize="small" />
-                            )}
-                          </Avatar>
-
-                          <Box
-                            sx={{
-                              maxWidth: {
-                                xs: "85%",
-                                md: "78%",
-                              },
-                            }}
-                          >
-                            {/* ===========================
-                                MESSAGE
-                                =========================== */}
-
-                            <Paper
-                              elevation={0}
-                              sx={{
-                                px: 2,
-                                py: 1.75,
-                                borderRadius: 2.5,
-                                bgcolor:
-                                  isUser
-                                    ? "primary.main"
-                                    : "background.paper",
-                                color:
-                                  isUser
-                                    ? "primary.contrastText"
-                                    : "text.primary",
-                                border:
-                                  isUser
-                                    ? "none"
-                                    : "1px solid",
-                                borderColor:
-                                  "divider",
-                                boxShadow:
-                                  isUser
-                                    ? "0 5px 18px rgba(0,0,0,0.10)"
-                                    : "0 4px 18px rgba(0,0,0,0.04)",
-                              }}
-                            >
-                              <Typography
-                                variant="body1"
-                                sx={{
-                                  whiteSpace:
-                                    "pre-wrap",
-                                  lineHeight: 1.7,
-                                }}
-                              >
-                                {
-                                  message.content
-                                }
-                              </Typography>
-                            </Paper>
-
-                            {/* ===========================
-                                SOURCES
-                                =========================== */}
-
-                            {!isUser &&
-                              message.sources &&
-                              message.sources
-                                .length >
-                                0 && (
-                                <Box
-                                  sx={{
-                                    mt: 1.5,
-                                  }}
-                                >
-                                  <Typography
-                                    variant="caption"
-                                    sx={{
-                                      display:
-                                        "block",
-                                      mb: 1,
-                                      fontWeight: 700,
-                                      color:
-                                        "text.secondary",
-                                      textTransform:
-                                        "uppercase",
-                                      letterSpacing: 0.7,
-                                    }}
-                                  >
-                                    Source
-                                  </Typography>
-
-                                  {getUniqueSources(
-                                    message.sources,
-                                  ).map(
-                                    (
-                                      source,
-                                      index,
-                                    ) => {
-                                      const filename =
-                                        getSourceFilename(
-                                          source,
-                                        );
-
-                                      const page =
-                                        getSourcePage(
-                                          source,
-                                        );
-
-                                      return (
-                                        <Paper
-                                          key={`${filename}-${index}`}
-                                          elevation={
-                                            0
-                                          }
-                                          sx={{
-                                            px: 1.5,
-                                            py: 1.25,
-                                            borderRadius:
-                                              1.75,
-                                            display:
-                                              "flex",
-                                            alignItems:
-                                              "center",
-                                            gap: 1.25,
-                                            border:
-                                              "1px solid",
-                                            borderColor:
-                                              "divider",
-                                            bgcolor:
-                                              "background.paper",
-                                          }}
-                                        >
-                                          <DescriptionOutlinedIcon
-                                            sx={{
-                                              fontSize: 20,
-                                              color:
-                                                "primary.main",
-                                              flexShrink: 0,
-                                            }}
-                                          />
-
-                                          <Box
-                                            sx={{
-                                              minWidth: 0,
-                                              flex: 1,
-                                            }}
-                                          >
-                                            <Typography
-                                              variant="body2"
-                                              sx={{
-                                                fontWeight: 600,
-                                                overflow:
-                                                  "hidden",
-                                                textOverflow:
-                                                  "ellipsis",
-                                                whiteSpace:
-                                                  "nowrap",
-                                              }}
-                                            >
-                                              {
-                                                filename
-                                              }
-                                            </Typography>
-
-                                            {page && (
-                                              <Typography
-                                                variant="caption"
-                                                color="text.secondary"
-                                              >
-                                                {
-                                                  page
-                                                }
-                                              </Typography>
-                                            )}
-                                          </Box>
-                                        </Paper>
-                                      );
-                                    },
-                                  )}
-                                </Box>
-                              )}
-                          </Box>
-                        </Box>
-                      );
-                    },
-                  )}
-
-                  {/* =======================================
-                      LOADING
-                      ======================================= */}
-
-                  {isLoading && (
-                    <Box
-                      sx={{
-                        display:
-                          "flex",
-                        gap: 1.5,
-                        alignItems:
-                          "flex-start",
-                      }}
-                    >
-                      <Avatar
-                        sx={{
-                          width: 34,
-                          height: 34,
-                          bgcolor:
-                            "primary.main",
-                        }}
-                      >
-                        <SmartToyOutlinedIcon fontSize="small" />
-                      </Avatar>
-
-                      <Paper
-                        elevation={0}
-                        sx={{
-                          px: 2,
-                          py: 1.5,
-                          borderRadius: 2.5,
-                          border:
-                            "1px solid",
-                          borderColor:
-                            "divider",
-                          display:
-                            "flex",
-                          alignItems:
-                            "center",
-                          gap: 1.25,
-                        }}
-                      >
-                        <CircularProgress
-                          size={17}
-                        />
-
-                        <Typography
-                          variant="body2"
-                          color="text.secondary"
-                        >
-                          Searching your
-                          knowledge...
-                        </Typography>
-                      </Paper>
-                    </Box>
-                  )}
-                </Box>
-              </Box>
-            </Box>
-          )}
-
-          {/* =================================================
-              ERROR
-              ================================================= */}
-
-          {error.length > 0 && (
-            <Box
-              sx={{
-                px: {
-                  xs: 2,
-                  md: 3,
-                },
-                pb: 1,
-              }}
-            >
-              <Box
-                sx={{
-                  maxWidth: 900,
-                  mx: "auto",
-                }}
-              >
-                <Alert
-                  severity="error"
-                  icon={
-                    <ErrorOutlineRoundedIcon />
-                  }
-                  onClose={() =>
-                    setError("")
-                  }
-                  sx={{
-                    borderRadius: 2,
-                  }}
-                >
-                  {error}
-                </Alert>
-              </Box>
-            </Box>
-          )}
-
-          {/* =================================================
-              COMPOSER
-              ================================================= */}
-
-          <Box
-            sx={{
-              px: {
-                xs: 1.5,
-                md: 3,
-              },
-              pt: 1.5,
-              pb: {
-                xs: 1.5,
-                md: 2.5,
-              },
-              borderTop: "1px solid",
-              borderColor: "divider",
-              bgcolor:
-                "background.paper",
-            }}
-          >
-            <Box
-              component="form"
-              onSubmit={handleSubmit}
-              sx={{
-                maxWidth: 900,
+                maxWidth: 820,
                 mx: "auto",
+                px: { xs: 2, md: 3 },
+                py: { xs: 3, md: 4 },
+                display: "flex",
+                flexDirection: "column",
+                gap: 3.5,
               }}
             >
-              <Paper
-                elevation={0}
-                sx={{
-                  display:
-                    "flex",
-                  alignItems:
-                    "flex-end",
-                  gap: 1,
-                  p: 0.75,
-                  pl: 1.75,
-                  borderRadius: 3,
-                  border: "1px solid",
-                  borderColor:
-                    isLoading
-                      ? "primary.main"
-                      : "divider",
-                  transition:
-                    "border-color 0.2s ease",
-
-                  "&:focus-within": {
-                    borderColor:
-                      "primary.main",
-                    boxShadow:
-                      "0 0 0 3px rgba(25,118,210,0.08)",
-                  },
-                }}
-              >
-                <TextField
-                  inputRef={inputRef}
-                  fullWidth
-                  multiline
-                  maxRows={5}
-                  value={query}
-                  onChange={(event) =>
-                    setQuery(
-                      event.target.value,
-                    )
-                  }
-                  onKeyDown={
-                    handleKeyDown
-                  }
-                  placeholder="Ask something about your documents..."
-                  variant="standard"
-                  disabled={
-                    isLoading ||
-                    isLoadingConversation
-                  }
-                  slotProps={{
-                    input: {
-                      disableUnderline:
-                        true,
-                    },
-                  }}
-                  sx={{
-                    "& .MuiInputBase-root":
-                      {
-                        py: 0.8,
-                        fontSize: 15,
-                      },
+              {messages.map((m) => (
+                <MessageItem
+                  key={m.id}
+                  message={m}
+                  modelName={modelName}
+                  citationsEnabled={citationsEnabled}
+                  onOpenSources={(msg, index) => {
+                    setEvidence({ sources: msg.sources ?? [], index });
+                    setEvidenceOpen(true);
                   }}
                 />
+              ))}
 
-                <Tooltip
-                  title={
-                    hasQueryText(
-                      query,
-                    )
-                      ? "Ask RAGENTIS"
-                      : "Enter a question"
-                  }
+              {isAsking && <ThinkingTurn modelName={modelName} />}
+
+              {failed && !isAsking && (
+                <Box
+                  role="alert"
+                  sx={(theme) => ({
+                    display: "flex",
+                    gap: 1.5,
+                    alignItems: "flex-start",
+                    p: 1.75,
+                    borderRadius: "12px",
+                    border: `1px solid ${theme.palette.rag.danger}55`,
+                    bgcolor: theme.palette.rag.dangerSoft,
+                    animation: "ragFadeInUp 300ms cubic-bezier(0.16,1,0.3,1) both",
+                  })}
                 >
-                  <span>
-                    <IconButton
-                      type="submit"
-                      disabled={
-                        !hasQueryText(
-                          query,
-                        ) ||
-                        isLoading ||
-                        isLoadingConversation
-                      }
-                      sx={{
-                        width: 44,
-                        height: 44,
-                        flexShrink: 0,
-                        bgcolor:
-                          "primary.main",
-                        color:
-                          "primary.contrastText",
-
-                        "&:hover": {
-                          bgcolor:
-                            "primary.dark",
-                        },
-
-                        "&.Mui-disabled":
-                          {
-                            bgcolor:
-                              "action.disabledBackground",
-                          },
-                      }}
-                    >
-                      {isLoading ? (
-                        <CircularProgress
-                          size={20}
-                          color="inherit"
-                        />
-                      ) : (
-                        <SendRoundedIcon fontSize="small" />
-                      )}
-                    </IconButton>
-                  </span>
-                </Tooltip>
-              </Paper>
-
-              {/* Composer footer */}
-
-              <Box
-                sx={{
-                  mt: 0.8,
-                  px: 0.5,
-                  display: "flex",
-                  alignItems:
-                    "center",
-                  justifyContent:
-                    "space-between",
-                }}
-              >
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                >
-                  RAGENTIS answers using
-                  your available
-                  knowledge base.
-                </Typography>
-
-                {hasMessages && (
-                  <Tooltip title="Start new chat">
-                    <IconButton
-                      size="small"
-                      onClick={
-                        handleNewChat
-                      }
-                      disabled={
-                        isLoading
-                      }
-                      sx={{
-                        color:
-                          "text.secondary",
-                      }}
-                    >
-                      <DeleteOutlineRoundedIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                )}
-              </Box>
+                  <ErrorOutlineRoundedIcon sx={{ color: "error.main", fontSize: 20, mt: 0.25 }} />
+                  <Box sx={{ flex: 1 }}>
+                    <Typography sx={{ fontSize: "0.875rem", fontWeight: 560 }}>No answer was generated</Typography>
+                    <Typography sx={{ fontSize: "0.8125rem", color: "text.secondary", mt: 0.25 }}>
+                      {failed.message}
+                    </Typography>
+                  </Box>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<ReplayRoundedIcon />}
+                    onClick={() => void ask(failed.question, { retry: true })}
+                  >
+                    Retry
+                  </Button>
+                </Box>
+              )}
             </Box>
-          </Box>
+          )}
+        </Box>
+
+        {/* Jump to latest */}
+        {hasThread && !atBottom && (
+          <IconButton
+            onClick={() => {
+              setAtBottom(true);
+              scrollToBottom(true);
+            }}
+            aria-label="Scroll to latest"
+            sx={(theme) => ({
+              position: "absolute",
+              left: "50%",
+              bottom: 128,
+              transform: "translateX(-50%)",
+              width: 34,
+              height: 34,
+              borderRadius: "50%",
+              bgcolor: theme.palette.rag.surface,
+              border: `1px solid ${theme.palette.rag.lineStrong}`,
+              boxShadow: theme.palette.rag.shadowLg,
+              animation: "ragFadeIn 200ms ease both",
+              "&:hover": { bgcolor: theme.palette.rag.raised },
+            })}
+          >
+            <KeyboardArrowDownRoundedIcon sx={{ fontSize: 20 }} />
+          </IconButton>
+        )}
+
+        {/* Composer */}
+        <Box sx={{ flexShrink: 0, px: { xs: 1.5, md: 3 }, pt: 1.5, pb: { xs: 1.5, md: 2 } }}>
+          <Composer
+            ref={inputRef}
+            value={query}
+            onChange={setQuery}
+            onSubmit={() => void ask(query)}
+            busy={isAsking || loadingConversation}
+            disabled={licenseBlocked}
+            disabledReason="The license has expired — an admin needs to renew it before questions can be asked."
+          />
         </Box>
       </Box>
 
-      <Divider />
+      <EvidenceDrawer
+        open={evidenceOpen}
+        sources={evidence?.sources ?? []}
+        highlight={evidence?.index ?? null}
+        onClose={() => setEvidenceOpen(false)}
+      />
     </Box>
   );
 }
-

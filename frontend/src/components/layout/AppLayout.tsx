@@ -1,87 +1,137 @@
-import { useState } from "react";
-import { Box, Toolbar } from "@mui/material";
-import { Outlet } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Box } from "@mui/material";
+import { Outlet, useLocation } from "react-router-dom";
 
-import Sidebar from "./Sidebar";
+import Sidebar, { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH } from "./Sidebar";
 import Topbar from "./Topbar";
+import CommandPalette from "./CommandPalette";
 import { useAppearance } from "../../context/AppearanceContext";
+import { ToastContainer } from "../common/Toast";
 
-const DRAWER_WIDTH = 260;
+const COLLAPSE_KEY = "ragentis_sidebar_collapsed";
+
+const readCollapsed = (): boolean => {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+/** Pages that manage their own full-height layout. */
+const FULL_HEIGHT_ROUTES = ["/ai-workspace"];
 
 export default function AppLayout() {
-  const [mobileOpen, setMobileOpen] = useState(false);
-
+  const location = useLocation();
   const { settings } = useAppearance();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [commandOpen, setCommandOpen] = useState(false);
 
   const compact = settings.compact;
+  const sidebarWidth = collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH;
+  const fullHeight = FULL_HEIGHT_ROUTES.includes(location.pathname);
 
-  const handleMenuClick = () => {
-    setMobileOpen((current) => !current);
-  };
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((value) => {
+      const next = !value;
+      try {
+        localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+      } catch {
+        /* storage unavailable: keep in memory only */
+      }
+      return next;
+    });
+  }, []);
 
-  const handleDrawerClose = () => {
-    setMobileOpen(false);
-  };
+  // Ctrl/⌘ + K opens the command palette; Ctrl/⌘ + B toggles the sidebar.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod) return;
+      const key = event.key.toLowerCase();
+      if (key === "k") {
+        event.preventDefault();
+        setCommandOpen((open) => !open);
+      } else if (key === "b") {
+        event.preventDefault();
+        toggleCollapsed();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [toggleCollapsed]);
 
   return (
-    <Box
-      sx={{
-        display: "flex",
-        minHeight: "100vh",
-      }}
-    >
-      <Topbar
-        drawerWidth={DRAWER_WIDTH}
-        onMenuClick={handleMenuClick}
+    <Box sx={{ minHeight: "100vh", position: "relative" }}>
+      {/* Ambient background: one slow-moving glow, purely decorative */}
+      <Box
+        aria-hidden
+        sx={(theme) => ({
+          position: "fixed",
+          inset: 0,
+          zIndex: 0,
+          pointerEvents: "none",
+          overflow: "hidden",
+          "&::before": {
+            content: '""',
+            position: "absolute",
+            width: "60vw",
+            height: "60vw",
+            top: "-25vw",
+            right: "-15vw",
+            borderRadius: "50%",
+            background: `radial-gradient(closest-side, ${theme.palette.rag.generateSoft}, transparent)`,
+            filter: "blur(20px)",
+            animation: "ragDrift 38s ease-in-out infinite",
+          },
+        })}
       />
 
       <Sidebar
-        open={mobileOpen}
-        onClose={handleDrawerClose}
-        drawerWidth={DRAWER_WIDTH}
+        mobileOpen={mobileOpen}
+        onMobileClose={() => setMobileOpen(false)}
+        collapsed={collapsed}
+        onToggleCollapsed={toggleCollapsed}
+      />
+
+      <Topbar
+        leftOffset={sidebarWidth}
+        onMenuClick={() => setMobileOpen(true)}
+        onOpenCommand={() => setCommandOpen(true)}
       />
 
       <Box
         component="main"
         sx={{
-          flexGrow: 1,
-
-          width: {
-            xs: "100%",
-            md: `calc(100% - ${DRAWER_WIDTH}px)`,
-          },
-
+          position: "relative",
+          zIndex: 1,
+          ml: { xs: 0, md: `${sidebarWidth}px` },
+          pt: "64px",
           minHeight: "100vh",
-
-          bgcolor: "background.default",
-
-          transition: settings.animations
-            ? "padding 180ms ease, margin 180ms ease"
-            : "none",
+          transition: "margin-left 240ms cubic-bezier(0.16, 1, 0.3, 1)",
         }}
       >
-        <Toolbar
-          sx={{
-            minHeight: compact ? 64 : 72,
-          }}
-        />
-
         <Box
-          sx={{
-            p: {
-              xs: compact ? 1.5 : 2,
-              sm: compact ? 2 : 3,
-              lg: compact ? 2.5 : 4,
-            },
-
-            transition: settings.animations
-              ? "padding 180ms ease"
-              : "none",
-          }}
+          key={location.pathname}
+          className="rag-page-enter"
+          sx={
+            fullHeight
+              ? { height: "calc(100vh - 64px)", p: { xs: 1, md: 1.5 } }
+              : {
+                  maxWidth: 1440,
+                  mx: "auto",
+                  px: { xs: 2, sm: 3, lg: compact ? 3 : 4 },
+                  py: { xs: 2.5, md: compact ? 2.5 : 4 },
+                }
+          }
         >
           <Outlet />
         </Box>
       </Box>
+
+      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
+      <ToastContainer />
     </Box>
   );
 }
