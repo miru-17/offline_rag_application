@@ -27,8 +27,8 @@ services:
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
-    ports:
-      - "127.0.0.1:11434:11434"
+    # No host port: the backend reaches Ollama inside Docker (http://ollama:11434).
+    # This also avoids a clash with an Ollama app installed on Windows (port 11434).
 
   backend:
     build: ./backend
