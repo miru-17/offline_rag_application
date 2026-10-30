@@ -44,10 +44,14 @@ def _document_text(document: Document) -> str:
 
 
 def extract_fields(text: str, filename: str, fields: list[dict]) -> dict:
-    field_lines = "\n".join(
-        f'- "{f["name"]}"' + (f": {neutralise(f.get("description") or '')}" if f.get("description") else "")
-        for f in fields
-    )
+    lines = []
+    for field in fields:
+        line = '- "' + field["name"] + '"'
+        description = field.get("description")
+        if description:
+            line += ": " + neutralise(description)
+        lines.append(line)
+    field_lines = "\n".join(lines)
     keys = ", ".join(f'"{f["name"]}"' for f in fields)
     prompt = f"""<rules>
 Read the document and return ONE JSON object with exactly these keys: {keys}.
