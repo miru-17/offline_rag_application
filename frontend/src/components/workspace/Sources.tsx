@@ -176,6 +176,9 @@ export function EvidenceDrawer({
                         value={source.chunk_index !== undefined ? `#${Number(source.chunk_index) + 1}` : "—"}
                       />
                       {source.document_id && <Meta label="Document ID" value={String(source.document_id).slice(0, 8)} mono />}
+                      {source.match && source.match !== "meaning" && (
+                        <Meta label="Found by" value={source.match === "keyword" ? "Exact words" : "Exact words + meaning"} />
+                      )}
                     </Box>
                   </Box>
                 </Box>

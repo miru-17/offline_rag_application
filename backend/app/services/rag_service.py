@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from app.services.ollama_service import active_model
 from app.services.ollama_service import generate_answer as llm_generate
 from app.services.ollama_service import stream_answer
 from app.services.prompt_builder import NOT_FOUND_ANSWER, build_prompt
@@ -23,6 +24,7 @@ class PreparedQuery:
     found: bool
     prompt: str = ""
     sources: list[dict] = field(default_factory=list)
+    model: str | None = None
 
 
 def looks_like_not_found(answer: str) -> bool:
@@ -56,6 +58,9 @@ class RAGService:
         group_ids: list[str] | None = None,
         history: list[dict] | None = None,
         document_id: str | None = None,
+        hybrid: bool = False,
+        language: str | None = "auto",
+        model: str | None = None,
     ) -> PreparedQuery:
         if not user_id or not tenant_id:
             raise ValueError("User and tenant are required for RAG.")
@@ -67,6 +72,7 @@ class RAGService:
             top_k=top_k,
             group_ids=group_ids,
             document_id=document_id,
+            hybrid=hybrid,
         )
 
         documents = results.get("documents", [[]])[0]
@@ -75,6 +81,7 @@ class RAGService:
 
         metadatas = results.get("metadatas", [[]])[0]
         distances = results.get("distances", [[]])[0]
+        matches = (results.get("matches") or [[]])[0]
 
         excerpts, sources = [], []
         for index, text in enumerate(documents):
@@ -92,10 +99,11 @@ class RAGService:
                 "chunk_index": metadata.get("chunk_index", 0),
                 "excerpt": text[:EXCERPT_CHARS] + ("…" if len(text) > EXCERPT_CHARS else ""),
                 "score": round(max(0.0, 1.0 - float(distances[index])), 3),
+                "match": matches[index] if index < len(matches) else "meaning",
             })
 
-        prompt = build_prompt(query=query, excerpts=excerpts, history=history)
-        return PreparedQuery(found=True, prompt=prompt, sources=sources)
+        prompt = build_prompt(query=query, excerpts=excerpts, history=history, language=language)
+        return PreparedQuery(found=True, prompt=prompt, sources=sources, model=model or active_model())
 
     def generate_answer(
         self,
@@ -105,14 +113,18 @@ class RAGService:
         top_k: int = 5,
         group_ids: list[str] | None = None,
         history: list[dict] | None = None,
+        hybrid: bool = False,
+        language: str | None = "auto",
+        model: str | None = None,
     ) -> dict:
-        prepared = self.prepare(query, user_id, tenant_id, top_k, group_ids, history)
+        prepared = self.prepare(query, user_id, tenant_id, top_k, group_ids, history,
+                                hybrid=hybrid, language=language, model=model)
         if not prepared.found:
             return {"answer": NOT_FOUND_ANSWER, "sources": [], "status": "not_found"}
 
-        answer = llm_generate(prepared.prompt)
+        answer = llm_generate(prepared.prompt, model=prepared.model)
         status = "not_found" if looks_like_not_found(answer) else "answered"
         return {"answer": answer, "sources": prepared.sources if status == "answered" else [], "status": status}
 
     def stream(self, prepared: PreparedQuery, stop=None):
-        return stream_answer(prepared.prompt, stop=stop)
+        return stream_answer(prepared.prompt, stop=stop, model=prepared.model)

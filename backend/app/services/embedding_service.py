@@ -5,7 +5,9 @@ from functools import lru_cache
 from sentence_transformers import SentenceTransformer
 
 
-MODEL_NAME = "all-MiniLM-L6-v2"
+from app.core.config import EMBEDDING_MODEL
+
+MODEL_NAME = EMBEDDING_MODEL
 
 # all-MiniLM-L6-v2 truncates input at 256 tokens by default.
 # Document chunks are up to 500 tokens, so raise the limit to the

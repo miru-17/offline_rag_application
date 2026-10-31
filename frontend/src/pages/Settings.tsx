@@ -36,6 +36,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useAppearance } from "../context/AppearanceContext";
 import { changePassword } from "../api/settings.api";
 import MfaSettings from "../components/rag/MfaSettings";
+import AdvancedAiSettings from "../components/rag/AdvancedAiSettings";
 import {
   getRAGSettings,
   updateRAGSettings,
@@ -345,6 +346,8 @@ export default function Settings() {
           )}
         </CardContent>
       </Card>
+
+      <AdvancedAiSettings isAdmin={isAdmin} />
 
       {/* ========================================================
           APPEARANCE & THEME TOKENS

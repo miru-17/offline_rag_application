@@ -157,3 +157,19 @@ WATCH_INTERVAL_SECONDS = _int("WATCH_INTERVAL_SECONDS", 30)
 WATCH_OWNER = os.getenv("WATCH_OWNER", "")               # username that owns auto-ingested files
 
 REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "reports"))
+
+
+# ------------------------------------------------------------
+# Search and models
+# ------------------------------------------------------------
+# Hybrid search: exact words / codes (invoice numbers, IDs) are matched in
+# addition to meaning-based search.
+HYBRID_SEARCH = os.getenv("HYBRID_SEARCH", "true").lower() == "true"
+# Embedding model. For Tamil / Hindi / other languages use
+# "paraphrase-multilingual-MiniLM-L12-v2" and re-index documents afterwards.
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+# Models an administrator may choose for their organisation (comma separated).
+OLLAMA_ALLOWED_MODELS = [m.strip() for m in os.getenv("OLLAMA_ALLOWED_MODELS", "").split(",") if m.strip()]
+
+# Retention clean-up runs this often (hours).
+RETENTION_INTERVAL_HOURS = _int("RETENTION_INTERVAL_HOURS", 24)

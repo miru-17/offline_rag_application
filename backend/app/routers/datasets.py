@@ -1,3 +1,4 @@
+from app.services.ollama_service import model_for_tenant, with_model
 import csv
 import io
 from pathlib import Path
@@ -183,7 +184,8 @@ async def ask_dataset(request: Request, dataset_id: UUID, payload: AskRequest,
     dataset = _get_dataset(db, current_user, dataset_id)
     frame, columns = await _load(dataset)
     try:
-        spec = await run_in_threadpool(question_to_spec, payload.question, columns)
+        spec = await run_in_threadpool(with_model(model_for_tenant(current_user.tenant), question_to_spec),
+                                      payload.question, columns)
         result = await run_in_threadpool(run_aggregate, frame, columns, spec)
     except AnalyticsError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

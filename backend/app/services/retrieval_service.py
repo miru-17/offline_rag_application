@@ -6,7 +6,12 @@ Retrieval for the RAG pipeline.
 2. Otherwise search all accessible documents (private + tenant shared +
    the user's team spaces) with the normal threshold (0.75).
 3. Drop chunks whose cosine distance is above the threshold.
-4. Remove duplicate chunks and keep the best top_k.
+4. Hybrid search (optional): chunks that literally contain codes / numbers
+   from the question (INV-7781, PO 4410, "exact phrase") are found by
+   keyword match even when meaning-based search misses them; plain words
+   only boost chunks that already passed the threshold. Both lists are
+   merged with reciprocal rank fusion.
+5. Remove duplicate chunks and keep the best top_k.
 """
 
 from __future__ import annotations
@@ -40,6 +45,9 @@ class RetrievalService:
         "document", "thesis", "paper", "agreement", "policy", "invoice", "contract",
     }
 
+    RRF_K = 60
+    MAX_TERMS = 6
+
     def __init__(self):
         self.embedding_service = EmbeddingService()
         self.vector_store = VectorStore()
@@ -66,6 +74,52 @@ class RetrievalService:
                 best_score, best_document = score, document
         return best_document
 
+    def keyword_terms(self, query: str) -> tuple[list[str], list[str]]:
+        """
+        (strong, weak) search terms.
+        strong: quoted phrases, codes containing digits (INV-7781, 45000),
+                acronyms (GSTIN) -> may add new chunks.
+        weak:   other long words -> only re-rank chunks already found.
+        """
+        strong: list[str] = []
+        for phrase in re.findall(r'"([^"]{3,80})"', query):
+            strong.append(phrase.strip())
+        unquoted = re.sub(r'"[^"]*"', " ", query)
+        for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9/_.-]*[A-Za-z0-9]|\d", unquoted):
+            token = token.strip(".-/_")
+            has_digit = any(c.isdigit() for c in token)
+            if (has_digit and len(token) >= 3) or (token.isupper() and len(token) >= 3 and token.isalpha()):
+                strong.append(token)
+        weak = [w for w in re.findall(r"[A-Za-z]{6,}", unquoted)
+                if w.lower() not in self.STOP_WORDS and w not in strong]
+
+        def unique(values):
+            seen, out = set(), []
+            for v in values:
+                if v.lower() not in seen:
+                    seen.add(v.lower())
+                    out.append(v)
+            return out
+
+        return unique(strong)[: self.MAX_TERMS], unique(weak)[: self.MAX_TERMS]
+
+    def _fuse(self, vector_items: list[dict], keyword_items: list[dict]) -> list[dict]:
+        scores: dict[str, float] = {}
+        items: dict[str, dict] = {}
+        for ranked in (vector_items, keyword_items):
+            for rank, item in enumerate(ranked):
+                scores[item["id"]] = scores.get(item["id"], 0.0) + 1.0 / (self.RRF_K + rank + 1)
+                items.setdefault(item["id"], item)
+        order = sorted(scores, key=lambda key: (-scores[key], items[key]["distance"]))
+        fused = []
+        for key in order:
+            item = dict(items[key])
+            item["match"] = "keyword+meaning" if (
+                any(v["id"] == key for v in vector_items) and any(k["id"] == key for k in keyword_items)
+            ) else ("keyword" if any(k["id"] == key for k in keyword_items) else "meaning")
+            fused.append(item)
+        return fused
+
     @staticmethod
     def _deduplicate(items: list[dict], top_k: int) -> list[dict]:
         seen_doc, seen_name, selected = set(), set(), []
@@ -91,6 +145,7 @@ class RetrievalService:
         top_k: int = 5,
         group_ids: list[str] | None = None,
         document_id: str | None = None,
+        hybrid: bool = False,
     ):
         if not query or not query.strip():
             raise ValueError("Query cannot be empty.")
@@ -121,8 +176,6 @@ class RetrievalService:
         )
 
         distances = results.get("distances", [[]])[0]
-        if not distances:
-            return dict(EMPTY)
 
         items = [
             {
@@ -135,6 +188,34 @@ class RetrievalService:
             if distance <= threshold
         ]
         items.sort(key=lambda item: item["distance"])
+
+        keyword_count = 0
+        if hybrid:
+            strong, weak = self.keyword_terms(query)
+            keyword_items = []
+            if strong or weak:
+                hits = self.vector_store.keyword_search(
+                    terms=strong + weak,
+                    query_embedding=query_embedding,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                    limit=candidate_count,
+                    document_id=document_id,
+                    group_ids=group_ids,
+                )
+                passed = {item["id"] for item in items}
+                for hit in hits:
+                    text = hit["document"] or ""
+                    if any(t in text for t in strong) or hit["id"] in passed:
+                        keyword_items.append(hit)
+                keyword_items.sort(key=lambda h: (-sum(1 for t in strong if t in (h["document"] or "")),
+                                                  -h["matches"], h["distance"]))
+            keyword_count = len(keyword_items)
+            if keyword_items:
+                items = self._fuse(items, keyword_items)
+
+        if not items:
+            return dict(EMPTY)
         final = self._deduplicate(items, top_k)
 
         logger.debug(
@@ -144,6 +225,7 @@ class RetrievalService:
                 "kept": len(final),
                 "threshold": threshold,
                 "document_scoped": bool(document_id),
+                "keyword_hits": keyword_count,
             }},
         )
 
@@ -152,4 +234,5 @@ class RetrievalService:
             "documents": [[i["document"] for i in final]],
             "metadatas": [[i["metadata"] for i in final]],
             "distances": [[i["distance"] for i in final]],
+            "matches": [[i.get("match", "meaning") for i in final]],
         }

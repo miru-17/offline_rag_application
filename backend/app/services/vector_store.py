@@ -24,6 +24,17 @@ logger = get_logger("vector_store")
 VISIBILITIES = {"PRIVATE", "TENANT", "GROUP"}
 
 
+def _cosine_distance(a, b) -> float:
+    if a is None or b is None:
+        return 1.0
+    dot = sum(float(x) * float(y) for x, y in zip(a, b))
+    norm_a = sum(float(x) * float(x) for x in a) ** 0.5
+    norm_b = sum(float(y) * float(y) for y in b) ** 0.5
+    if not norm_a or not norm_b:
+        return 1.0
+    return max(0.0, 1.0 - dot / (norm_a * norm_b))
+
+
 @lru_cache(maxsize=1)
 def _client():
     # One client per process, as recommended by Chroma.
@@ -183,6 +194,55 @@ class VectorStore:
             "metadatas": [[m["metadata"] for m in merged]],
             "distances": [[m["distance"] for m in merged]],
         }
+
+    def keyword_search(
+        self,
+        terms: list[str],
+        query_embedding,
+        user_id,
+        tenant_id,
+        limit: int = 20,
+        document_id=None,
+        group_ids: list[str] | None = None,
+    ) -> list[dict]:
+        """
+        Chunks that contain any of `terms` literally (same access filters as
+        search). Each hit carries its cosine distance to the question and
+        how many terms it contains.
+        """
+        if not terms:
+            return []
+        if len(terms) == 1:
+            where_document = {"$contains": terms[0]}
+        else:
+            where_document = {"$or": [{"$contains": t} for t in terms]}
+
+        hits = []
+        for collection, where in (
+            (self._get_user_collection(user_id), self._private_filter(tenant_id, user_id, document_id)),
+            (self._get_shared_collection(tenant_id), self._shared_filter(tenant_id, group_ids, document_id)),
+        ):
+            if collection.count() == 0:
+                continue
+            result = collection.get(
+                where=where,
+                where_document=where_document,
+                limit=limit,
+                include=["documents", "metadatas", "embeddings"],
+            )
+            embeddings = result.get("embeddings")
+            for i, chunk_id in enumerate(result.get("ids") or []):
+                text = result["documents"][i] or ""
+                vector = embeddings[i] if embeddings is not None and len(embeddings) > i else None
+                hits.append({
+                    "id": chunk_id,
+                    "document": text,
+                    "metadata": result["metadatas"][i],
+                    "distance": _cosine_distance(query_embedding, vector),
+                    "matches": sum(1 for t in terms if t in text),
+                })
+        hits.sort(key=lambda h: (-h["matches"], h["distance"]))
+        return hits[:limit]
 
     # ------------------------------------------------------------
     # Accessible documents (metadata only)

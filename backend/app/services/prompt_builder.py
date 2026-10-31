@@ -21,11 +21,36 @@ def neutralise(text: str) -> str:
     return _TAG_PATTERN.sub(lambda m: m.group(0).replace("<", "(").replace(">", ")"), text or "")
 
 
+LANGUAGES = {
+    "en": "English",
+    "ta": "Tamil",
+    "hi": "Hindi",
+    "te": "Telugu",
+    "kn": "Kannada",
+    "ml": "Malayalam",
+    "mr": "Marathi",
+    "bn": "Bengali",
+    "gu": "Gujarati",
+    "ar": "Arabic",
+    "fr": "French",
+    "de": "German",
+    "es": "Spanish",
+}
+
+
+def language_rule(language: str | None) -> str:
+    if language and language in LANGUAGES:
+        return f"7. Write the answer in {LANGUAGES[language]}, even if the documents are in another language."
+    return ("7. Write the answer in the same language as the question, even if the documents\n"
+            "   are in another language.")
+
+
 def build_prompt(
     query: str,
     context: str = "",
     excerpts: list[dict] | None = None,
     history: list[dict] | None = None,
+    language: str | None = "auto",
 ) -> str:
     query = (query or "").strip()
     if not query:
@@ -64,6 +89,8 @@ You are RAGENTIS, a document assistant for a private, offline company system.
    [1], [2] using the document id.
 6. The <history> section only explains what earlier questions referred to.
    It is not a source of facts.
+{language_rule(language)}
+   The "cannot answer" sentence in rule 4 is always written exactly as given, in English.
 </rules>
 
 {context_block}

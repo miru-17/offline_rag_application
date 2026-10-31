@@ -47,6 +47,20 @@ class Tenant(Base):
         server_default="flag",
     )
 
+    # Hybrid (keyword + meaning) search.
+    hybrid_search: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
+    # "auto" = answer in the language of the question, or a fixed language code.
+    answer_language: Mapped[str] = mapped_column(String(10), nullable=False, default="auto", server_default="auto")
+
+    # Local model for this organisation (must be in OLLAMA_ALLOWED_MODELS); empty = server default.
+    llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Data retention in days; empty = keep forever. Legal hold always wins.
+    conversation_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    audit_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    document_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     users = relationship(
         "User",
         back_populates="tenant",

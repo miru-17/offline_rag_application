@@ -17,6 +17,8 @@ export interface QuerySource {
   metadata?: Record<string, unknown>;
   chunk_index?: number;
   document_id?: string;
+  /** How the passage was found: by meaning, by exact words/codes, or both. */
+  match?: "meaning" | "keyword" | "keyword+meaning";
   [key: string]: unknown;
 }
 

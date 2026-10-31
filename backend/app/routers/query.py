@@ -21,7 +21,8 @@ from app.dependencies.license import require_valid_license
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.user import User
-from app.services.ollama_service import LLMError
+from app.core.config import HYBRID_SEARCH
+from app.services.ollama_service import LLMError, model_for_tenant
 from app.services.prompt_builder import NOT_FOUND_ANSWER
 from app.services.rag_service import RAGService, looks_like_not_found
 
@@ -113,6 +114,9 @@ async def query_documents(
             tenant.retrieval_depth,
             group_ids,
             history,
+            HYBRID_SEARCH and tenant.hybrid_search,
+            tenant.answer_language,
+            model_for_tenant(tenant),
         )
     except LLMError as exc:
         db.rollback()
@@ -193,6 +197,9 @@ def query_stream(
     user_id, tenant_id = str(current_user.id), str(current_user.tenant_id)
     top_k = current_user.tenant.retrieval_depth
     show_sources = current_user.tenant.source_attribution
+    hybrid = HYBRID_SEARCH and current_user.tenant.hybrid_search
+    language = current_user.tenant.answer_language
+    model = model_for_tenant(current_user.tenant)
     group_ids = get_user_group_ids(db, current_user)
 
     def save(answer: str, status: str, sources: list) -> str:
@@ -215,7 +222,8 @@ def query_stream(
         yield _sse("meta", {"conversation_id": str(conversation_id)})
 
         try:
-            prepared = await run_in_threadpool(rag_service.prepare, query, user_id, tenant_id, top_k, group_ids, history)
+            prepared = await run_in_threadpool(rag_service.prepare, query, user_id, tenant_id, top_k, group_ids, history,
+                                               None, hybrid, language, model)
         except Exception:
             logger.exception("Retrieval failed")
             await run_in_threadpool(save, "Retrieval failed.", "error", [])

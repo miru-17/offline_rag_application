@@ -23,7 +23,7 @@ from app.routers.license import router as license_router
 from app.routers.query import router as query_router
 from app.routers.rag_settings import router as rag_settings_router
 from app.routers.system import router as system_router
-from app.services import document_ingestion_service, extraction_service, watch_service
+from app.services import document_ingestion_service, extraction_service, retention_service, watch_service
 
 setup_logging()
 logger = get_logger("main")
@@ -43,8 +43,10 @@ async def lifespan(app: FastAPI):
         watch_service.start_from_config()
     except Exception:
         logger.exception("Could not start the watched folder")
+    retention_service.start()
     yield
     watch_service.stop()
+    retention_service.stop()
 
 
 docs_enabled = os.getenv("ENABLE_API_DOCS", "true").lower() == "true"

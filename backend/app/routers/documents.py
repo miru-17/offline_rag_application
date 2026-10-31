@@ -26,7 +26,7 @@ from app.services.access import get_content_document, readable_documents_clause
 from app.services.document_processor import ExtractionError
 from app.services.document_service import UploadValidationError, save_uploaded_file
 from app.services.document_tools_service import compare_documents, summarize_document, summarize_changes
-from app.services.ollama_service import LLMError
+from app.services.ollama_service import LLMError, model_for_tenant, with_model
 from app.services.vector_store import VectorStore
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -300,7 +300,8 @@ async def document_summary(
 ):
     document = _ready_content_document(db, current_user, document_id)
     try:
-        result = await run_in_threadpool(summarize_document, document.file_path, document.file_type, document.filename)
+        result = await run_in_threadpool(with_model(model_for_tenant(current_user.tenant), summarize_document),
+                                         document.file_path, document.file_type, document.filename)
     except (ExtractionError, LLMError) as exc:
         raise HTTPException(status_code=503 if isinstance(exc, LLMError) else 422, detail=str(exc))
 
@@ -327,7 +328,8 @@ async def compare(
                                          doc_b.file_path, doc_b.file_type)
         summary = None
         if payload.summarize:
-            summary = await run_in_threadpool(summarize_changes, result, doc_a.filename, doc_b.filename)
+            summary = await run_in_threadpool(with_model(model_for_tenant(current_user.tenant), summarize_changes),
+                                              result, doc_a.filename, doc_b.filename)
     except ExtractionError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except LLMError as exc:

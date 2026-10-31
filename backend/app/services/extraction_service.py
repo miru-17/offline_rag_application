@@ -94,6 +94,9 @@ def _run(job_id: str) -> None:
         job = db.get(ExtractionJob, uuid.UUID(job_id))
         if job is None:
             return
+        from app.models.tenant import Tenant
+        from app.services import ollama_service
+        ollama_service._local.model = ollama_service.model_for_tenant(db.get(Tenant, job.tenant_id))
         job.status = "processing"
         db.commit()
 
