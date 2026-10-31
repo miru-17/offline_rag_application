@@ -57,6 +57,7 @@ class DocumentIngestionService:
         chunks: list[str] = []
         locations: list[dict] = []
         pii_counts: Counter = Counter()
+        ocr_pages = sum(1 for segment in segments if segment.ocr)
 
         for segment in segments:
             text = segment.text
@@ -94,6 +95,7 @@ class DocumentIngestionService:
             "chunks": stored,
             "page_count": max(pages) if pages else None,
             "pii": dict(pii_counts),
+            "ocr_pages": ocr_pages,
         }
 
     # Backwards-compatible name used by older scripts.
@@ -146,8 +148,12 @@ def _process(document_id: str) -> None:
             if pii_mode != "off" else None
         )
         document.processed_at = datetime.now(timezone.utc)
+        document.ocr_pages = result.get("ocr_pages", 0)
         db.commit()
         logger.info("Document indexed", extra={"fields": {"document_id": document_id, "chunks": result["chunks"]}})
+
+        if document.replaces_document_id:
+            _supersede(db, document)
 
     except ExtractionError as exc:
         _fail(db, document_id, str(exc))
@@ -158,6 +164,30 @@ def _process(document_id: str) -> None:
         db.close()
         with _pending_lock:
             _pending.discard(document_id)
+
+
+def _supersede(db, new_version: Document) -> None:
+    """The new version is ready: take the previous version out of search."""
+    previous = db.get(Document, new_version.replaces_document_id)
+    if previous is None or previous.superseded_at is not None:
+        return
+    VectorStore().delete_document_vectors(
+        document_id=str(previous.id),
+        user_id=str(previous.user_id),
+        tenant_id=str(previous.tenant_id),
+        visibility=previous.visibility,
+    )
+    previous.status = "superseded"
+    previous.superseded_at = datetime.now(timezone.utc)
+    db.commit()
+    audit_service.record(
+        "document.new_version",
+        tenant_id=new_version.tenant_id,
+        target_type="document",
+        target_id=new_version.id,
+        target_label=new_version.filename,
+        details={"version": new_version.version, "replaces": str(previous.id)},
+    )
 
 
 def _fail(db, document_id: str, message: str) -> None:

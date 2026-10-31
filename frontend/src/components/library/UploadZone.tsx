@@ -11,7 +11,7 @@ import FileTypeIcon from "../common/FileTypeIcon";
 import { formatBytes, getApiErrorMessage } from "../../utils/format";
 
 export const MAX_FILE_SIZE = 25 * 1024 * 1024;
-const ALLOWED = [".pdf", ".docx", ".xlsx"];
+const ALLOWED = [".pdf", ".docx", ".xlsx", ".png", ".jpg", ".jpeg"];
 
 type UploadStatus = "queued" | "uploading" | "indexing" | "done" | "failed";
 
@@ -35,7 +35,7 @@ interface UploadZoneProps {
 
 const validate = (file: File): string | null => {
   const lower = file.name.toLowerCase();
-  if (!ALLOWED.some((ext) => lower.endsWith(ext))) return "Only PDF, Word (.docx) and Excel (.xlsx) files are supported.";
+  if (!ALLOWED.some((ext) => lower.endsWith(ext))) return "Only PDF, Word (.docx), Excel (.xlsx) and image (.png, .jpg) files are supported.";
   if (file.size > MAX_FILE_SIZE) return `File is ${formatBytes(file.size)}; the limit is 25 MB.`;
   if (file.size === 0) return "File is empty.";
   return null;
@@ -167,7 +167,7 @@ export default function UploadZone({ isAdmin, tenantName, large, onUploaded, upl
           hidden
           multiple
           type="file"
-          accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          accept=".pdf,.docx,.xlsx,.png,.jpg,.jpeg,image/png,image/jpeg,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           onChange={(e) => {
             if (e.target.files) addFiles(e.target.files);
             e.target.value = "";
@@ -194,7 +194,7 @@ export default function UploadZone({ isAdmin, tenantName, large, onUploaded, upl
             {dragging ? "Drop to upload" : "Drop files here or click to browse"}
           </Typography>
           <Typography sx={{ fontSize: "0.78rem", color: "text.secondary", mt: 0.25 }}>
-            PDF, Word or Excel, up to 25 MB each.{" "}
+            PDF, Word, Excel or scanned images, up to 25 MB each.{" "}
             {sharingLabel ??
               (isAdmin
                 ? `Files you upload are shared with everyone in ${tenantName ?? "your organisation"}.`

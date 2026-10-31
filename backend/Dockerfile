@@ -6,7 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/hf_cache \
     UPLOAD_ROOT=/app/uploads \
-    CHROMA_PATH=/app/chroma_db
+    CHROMA_PATH=/app/chroma_db \
+    REPORTS_DIR=/app/reports
+
+# Tesseract reads scanned PDFs and photos (OCR). English + Tamil + Hindi.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-tam tesseract-ocr-hin \
+    && rm -rf /var/lib/apt/lists/*
 
 # CPU-only PyTorch: avoids ~3 GB of CUDA libraries a laptop cannot use.
 RUN pip install --no-cache-dir --upgrade pip \
@@ -24,8 +30,8 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # give that user ownership of the data volumes (also volumes from older
 # versions), then drops privileges.
 RUN useradd --system --uid 10001 --home-dir /app ragentis \
-    && mkdir -p /app/uploads /app/chroma_db /hf_cache \
-    && chown -R ragentis:ragentis /app/uploads /app/chroma_db /hf_cache \
+    && mkdir -p /app/uploads /app/chroma_db /app/reports /hf_cache \
+    && chown -R ragentis:ragentis /app/uploads /app/chroma_db /app/reports /hf_cache \
     && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8000

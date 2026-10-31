@@ -1,6 +1,6 @@
 import apiClient from "./axios";
 
-export type DocumentStatus = "queued" | "processing" | "ready" | "failed";
+export type DocumentStatus = "queued" | "processing" | "ready" | "failed" | "superseded";
 export type Visibility = "PRIVATE" | "TENANT" | "GROUP";
 
 export interface DocumentItem {
@@ -20,6 +20,13 @@ export interface DocumentItem {
   owner?: string | null;
   created_at?: string;
   processed_at?: string | null;
+  /** Pages read with OCR (scanned PDFs / photos). */
+  ocr_pages?: number;
+  version?: number;
+  version_group_id?: string | null;
+  legal_hold?: boolean;
+  /** "watch:<path>" when the file came from the watched folder. */
+  source_path?: string | null;
 }
 
 /** Shape returned by GET /documents/{id}. */
@@ -42,6 +49,8 @@ export interface UploadOptions {
   visibility?: Visibility;
   groupId?: string;
   allowDuplicate?: boolean;
+  /** Upload as a new version of this document (keeps its sharing). */
+  replaceDocumentId?: string;
 }
 
 export const uploadDocument = async (
@@ -54,6 +63,7 @@ export const uploadDocument = async (
   if (options.visibility) formData.append("visibility", options.visibility);
   if (options.groupId) formData.append("group_id", options.groupId);
   if (options.allowDuplicate) formData.append("allow_duplicate", "true");
+  if (options.replaceDocumentId) formData.append("replace_document_id", options.replaceDocumentId);
 
   const response = await apiClient.post<DocumentItem>("/documents/upload", formData, {
     headers: { "Content-Type": "multipart/form-data" },
@@ -113,6 +123,57 @@ export const compareDocuments = async (a: string, b: string, summarize: boolean)
     { document_a: a, document_b: b, summarize },
     { timeout: 300000 },
   );
+  return response.data;
+};
+
+/**
+ * Opens the original file in a new tab, at the cited page for PDFs.
+ * The file is fetched with the user's session (no token in the URL).
+ */
+export const openDocumentFile = async (documentId: string, page?: number | string | null): Promise<void> => {
+  // Open the tab first (inside the click) so pop-up blockers allow it.
+  const tab = window.open("", "_blank");
+  try {
+    const response = await apiClient.get<Blob>(`/documents/${documentId}/file`, { responseType: "blob" });
+    const url = URL.createObjectURL(response.data);
+    const target = page ? `${url}#page=${page}` : url;
+    if (tab) tab.location.href = target;
+    else window.location.assign(target);
+    window.setTimeout(() => URL.revokeObjectURL(url), 5 * 60 * 1000);
+  } catch (error) {
+    tab?.close();
+    throw error;
+  }
+};
+
+export const getDocumentVersions = async (documentId: string): Promise<DocumentItem[]> => {
+  const response = await apiClient.get<DocumentItem[]>(`/documents/${documentId}/versions`);
+  return response.data;
+};
+
+export const setLegalHold = async (documentId: string, hold: boolean): Promise<DocumentItem> => {
+  const response = await apiClient.patch<DocumentItem>(`/documents/${documentId}/legal-hold`, null, { params: { hold } });
+  return response.data;
+};
+
+export interface DocumentTable {
+  index: number;
+  name: string;
+  columns: string[];
+  row_count: number;
+  preview: string[][];
+}
+
+export const getDocumentTables = async (documentId: string): Promise<DocumentTable[]> => {
+  const response = await apiClient.get<{ tables: DocumentTable[] }>(`/documents/${documentId}/tables`);
+  return response.data.tables;
+};
+
+export const importDocumentTable = async (
+  documentId: string,
+  tableIndex: number,
+): Promise<{ dataset_id: string; name: string; rows: number }> => {
+  const response = await apiClient.post(`/documents/${documentId}/tables/${tableIndex}/dataset`);
   return response.data;
 };
 

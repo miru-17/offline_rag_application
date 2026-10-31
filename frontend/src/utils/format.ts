@@ -1,12 +1,13 @@
 import { isAxiosError } from "axios";
 
-export type FileKind = "pdf" | "docx" | "xlsx" | "other";
+export type FileKind = "pdf" | "docx" | "xlsx" | "image" | "other";
 
 export const getFileKind = (filename?: string, fileType?: string): FileKind => {
   const source = `${fileType ?? ""} ${filename ?? ""}`.toLowerCase();
   if (source.includes("pdf")) return "pdf";
   if (source.includes("docx") || source.includes("word")) return "docx";
   if (source.includes("xlsx") || source.includes("sheet")) return "xlsx";
+  if (/\b(png|jpe?g)\b|\.(png|jpe?g)\b/.test(source)) return "image";
   return "other";
 };
 
@@ -14,6 +15,7 @@ export const FILE_KIND_LABEL: Record<FileKind, string> = {
   pdf: "PDF",
   docx: "Word",
   xlsx: "Excel",
+  image: "Image (read with OCR)",
   other: "File",
 };
 

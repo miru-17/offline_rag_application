@@ -23,7 +23,7 @@ from app.routers.license import router as license_router
 from app.routers.query import router as query_router
 from app.routers.rag_settings import router as rag_settings_router
 from app.routers.system import router as system_router
-from app.services import document_ingestion_service, extraction_service
+from app.services import document_ingestion_service, extraction_service, watch_service
 
 setup_logging()
 logger = get_logger("main")
@@ -39,7 +39,12 @@ async def lifespan(app: FastAPI):
             logger.info("Resumed unfinished document processing", extra={"fields": {"documents": resumed}})
     except Exception:
         logger.exception("Could not resume background work")
+    try:
+        watch_service.start_from_config()
+    except Exception:
+        logger.exception("Could not start the watched folder")
     yield
+    watch_service.stop()
 
 
 docs_enabled = os.getenv("ENABLE_API_DOCS", "true").lower() == "true"

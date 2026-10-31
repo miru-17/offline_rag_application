@@ -142,3 +142,18 @@ LDAP_EMAIL_ATTRIBUTE = os.getenv("LDAP_EMAIL_ATTRIBUTE", "mail")
 LDAP_GROUP_ROLE_MAP = os.getenv("LDAP_GROUP_ROLE_MAP", "")
 LDAP_DEFAULT_ROLE = os.getenv("LDAP_DEFAULT_ROLE", "VIEWER")
 LDAP_TIMEOUT_SECONDS = _int("LDAP_TIMEOUT_SECONDS", 5)
+
+# ------------------------------------------------------------------
+# OCR, watched folder, reports
+# ------------------------------------------------------------------
+
+OCR_ENABLED = _bool("OCR_ENABLED", True)
+OCR_LANGUAGES = os.getenv("OCR_LANGUAGES", "eng")      # e.g. "eng+tam+hin" if installed
+OCR_MAX_PAGES = _int("OCR_MAX_PAGES", 50)
+OCR_DPI = _int("OCR_DPI", 200)
+
+WATCH_FOLDER = os.getenv("WATCH_FOLDER", "")             # e.g. /app/watch
+WATCH_INTERVAL_SECONDS = _int("WATCH_INTERVAL_SECONDS", 30)
+WATCH_OWNER = os.getenv("WATCH_OWNER", "")               # username that owns auto-ingested files
+
+REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "reports"))

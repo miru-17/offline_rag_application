@@ -6,6 +6,7 @@ const KIND_STYLE: Record<FileKind, { label: string; color: string }> = {
   pdf: { label: "PDF", color: "#F06A6A" },
   docx: { label: "DOC", color: "#5B8CFF" },
   xlsx: { label: "XLS", color: "#2FBF8A" },
+  image: { label: "IMG", color: "#B07CF0" },
   other: { label: "FILE", color: "#8D9AB3" },
 };
 

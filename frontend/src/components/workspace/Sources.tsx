@@ -4,7 +4,11 @@ import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
 
 import { useNavigate } from "react-router-dom";
 
+import { useState } from "react";
+
+import { openDocumentFile } from "../../api/documents.api";
 import type { QuerySource } from "../../api/query.api";
+import { toast } from "../common/Toast";
 import FileTypeIcon from "../common/FileTypeIcon";
 import { getSourceFilename, getSourcePage, getSourceSnippet } from "./types";
 
@@ -100,6 +104,7 @@ export function EvidenceDrawer({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
+  const [opening, setOpening] = useState<number | null>(null);
   const hasSnippets = sources.some((s) => getSourceSnippet(s));
   const documentCount = new Set(sources.map((s) => s.document_id || getSourceFilename(s))).size;
 
@@ -138,6 +143,7 @@ export function EvidenceDrawer({
             const page = getSourcePage(source);
             const snippet = getSourceSnippet(source);
             const active = highlight === i;
+            const pdfPage = page && /^\d+$/.test(page) ? page : null;
 
             return (
               <Box
@@ -191,17 +197,35 @@ export function EvidenceDrawer({
                 )}
 
                 {source.document_id && (
-                  <Button
-                    size="small"
-                    endIcon={<OpenInNewRoundedIcon sx={{ fontSize: "14px !important" }} />}
-                    onClick={() => {
-                      onClose();
-                      navigate("/documents", { state: { focusId: source.document_id } });
-                    }}
-                    sx={{ mt: 1, ml: -0.75 }}
-                  >
-                    Show in Documents
-                  </Button>
+                  <Box sx={{ display: "flex", gap: 0.5, mt: 1, ml: -0.75, flexWrap: "wrap" }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={opening === i}
+                      endIcon={<OpenInNewRoundedIcon sx={{ fontSize: "14px !important" }} />}
+                      onClick={async () => {
+                        setOpening(i);
+                        try {
+                          await openDocumentFile(String(source.document_id), pdfPage);
+                        } catch {
+                          toast.error("The original file could not be opened.");
+                        } finally {
+                          setOpening(null);
+                        }
+                      }}
+                    >
+                      {pdfPage ? `Open at page ${pdfPage}` : "Open original"}
+                    </Button>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        onClose();
+                        navigate("/documents", { state: { focusId: source.document_id } });
+                      }}
+                    >
+                      Show in Documents
+                    </Button>
+                  </Box>
                 )}
               </Box>
             );

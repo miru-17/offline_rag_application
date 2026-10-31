@@ -313,7 +313,7 @@ export default function Documents() {
 
   const askAbout = (doc: DocumentItem) =>
     navigate("/ai-workspace", {
-      state: { prefill: `Summarise the key points of “${doc.filename.replace(/\.(pdf|docx|xlsx)$/i, "")}”` },
+      state: { prefill: `Summarise the key points of “${doc.filename.replace(/\.(pdf|docx|xlsx|png|jpe?g)$/i, "")}”` },
     });
 
   const clearFilters = () => {
@@ -474,6 +474,7 @@ export default function Documents() {
             <MenuItem value="pdf">PDF</MenuItem>
             <MenuItem value="docx">Word</MenuItem>
             <MenuItem value="xlsx">Excel</MenuItem>
+            <MenuItem value="image">Images</MenuItem>
           </Select>
           <Select
             size="small"
@@ -592,6 +593,10 @@ export default function Documents() {
                         {VISIBILITY_LABEL[doc.visibility ?? "PRIVATE"]}
                         {doc.group_name ? ` · ${doc.group_name}` : ""}
                         {doc.page_count ? ` · ${doc.page_count} pages` : ""}
+                        {(doc.version ?? 1) > 1 ? ` · v${doc.version}` : ""}
+                        {doc.ocr_pages ? " · OCR" : ""}
+                        {doc.legal_hold ? " · Legal hold" : ""}
+                        {doc.source_path?.startsWith("watch:") ? " · Watched folder" : ""}
                         {isAdmin && doc.owner ? ` · ${doc.owner}` : ""}
                         {doc.pii_summary && doc.pii_summary.total > 0 && (
                           <Tooltip title={`Personal data ${doc.pii_summary.mode === "redact" ? "redacted" : "found"}: ` +
@@ -728,8 +733,10 @@ export default function Documents() {
         document={drawerDoc}
         open={drawerOpen}
         canDelete={canUpload}
+        isAdmin={isAdmin}
         onClose={() => setDrawerOpen(false)}
         onDelete={(doc) => setToDelete(doc)}
+        onChanged={() => void load(true)}
       />
 
       <Dialog open={Boolean(toDelete)} onClose={() => !deleting && setToDelete(null)} maxWidth="xs" fullWidth>

@@ -18,7 +18,8 @@ from fastapi import UploadFile
 
 from app.core.config import MAX_DATASET_MB, MAX_UPLOAD_MB, UPLOAD_ROOT
 
-DOCUMENT_TYPES = {".pdf": "pdf", ".docx": "docx", ".xlsx": "xlsx"}
+DOCUMENT_TYPES = {".pdf": "pdf", ".docx": "docx", ".xlsx": "xlsx",
+                  ".png": "png", ".jpg": "jpg", ".jpeg": "jpg"}
 DATASET_TYPES = {".csv": "csv", ".xlsx": "xlsx"}
 
 MAX_FILE_SIZE = MAX_UPLOAD_MB * 1024 * 1024
@@ -86,6 +87,12 @@ def validate_content(content: bytes, file_type: str) -> None:
         _check_office_zip(content, file_type)
     elif file_type == "csv":
         _check_csv(content)
+    elif file_type == "png":
+        if not content.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise UploadValidationError("The file content does not match its extension.")
+    elif file_type == "jpg":
+        if not content.startswith(b"\xff\xd8\xff"):
+            raise UploadValidationError("The file content does not match its extension.")
     else:
         raise UploadValidationError("Unsupported file type.")
 

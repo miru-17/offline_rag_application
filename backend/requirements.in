@@ -31,3 +31,10 @@ dnspython>=2.9.0
 aiohttp>=3.14.4
 multidict>=6.9.1
 opentelemetry-api>=1.45.1
+# v3 features
+pyotp==2.10.0
+ldap3==2.9.1
+pytesseract==0.3.13
+pypdfium2==5.14.0
+pillow
+fpdf2==2.9.0

@@ -119,6 +119,24 @@ class Document(Base):
         nullable=True,
     )
 
+    # Pages that were read with OCR (scanned pages / images).
+    ocr_pages: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    # --- Versions -----------------------------------------------------
+    # All versions of one document share version_group_id. When a new
+    # version becomes ready, the previous one is marked "superseded" and its
+    # passages are removed from search, so old text no longer answers.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    version_group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    replaces_document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Relative path inside the watched folder, for auto-ingested files.
+    source_path: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
+
+    # Legal hold: never removed by retention policies.
+    legal_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.utcnow,

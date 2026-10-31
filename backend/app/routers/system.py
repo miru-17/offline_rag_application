@@ -10,6 +10,8 @@ from app.dependencies.auth import require_roles
 from app.models.dataset import Dataset
 from app.models.document import Document
 from app.models.user import User
+from app.services.document_processor import ocr_available
+from app.services import watch_service
 from app.services import document_ingestion_service as ingestion
 from app.services import ollama_service
 from app.services.license_service import LicenseService
@@ -74,4 +76,6 @@ def system_health(current_user: User = Depends(require_roles("ADMIN")), db: Sess
         "license": {"state": license_state.state, "days_left": license_state.days_left,
                     "message": license_state.message},
         "disk": {"uploads": _disk(UPLOAD_ROOT), "vector_store": _disk(CHROMA_PATH)},
+        "watched_folder": watch_service.status(),
+        "ocr": ocr_available(),
     }

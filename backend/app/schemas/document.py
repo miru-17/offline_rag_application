@@ -21,6 +21,12 @@ class DocumentResponse(BaseModel):
     owner: str | None = None
     created_at: datetime
     processed_at: datetime | None = None
+    ocr_pages: int = 0
+    version: int = 1
+    version_group_id: UUID | None = None
+    legal_hold: bool = False
+    source_path: str | None = None
+    uploaded_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
