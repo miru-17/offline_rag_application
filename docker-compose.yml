@@ -17,9 +17,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    # Only reachable from this computer (not from the office network).
-    ports:
-      - "127.0.0.1:5432:5432"
+    # No host port: the backend reaches PostgreSQL inside Docker (postgres:5432).
+    # This avoids clashes with a PostgreSQL installed on Windows and keeps the
+    # database unreachable from outside. For direct access use:
+    #   docker exec -it ragentis-postgres psql -U postgres -d offline_rag
 
   ollama:
     image: ollama/ollama:latest
