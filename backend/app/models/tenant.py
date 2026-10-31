@@ -61,6 +61,9 @@ class Tenant(Base):
     audit_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     document_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Usage report: "weekly" (default) or "off".
+    report_schedule: Mapped[str] = mapped_column(String(10), nullable=False, default="weekly", server_default="weekly")
+
     users = relationship(
         "User",
         back_populates="tenant",

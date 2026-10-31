@@ -10,6 +10,8 @@ from app.models.audit_event import AuditEvent
 from app.models.dataset import Dataset
 from app.models.extraction_job import ExtractionJob
 from app.models.refresh_token import RefreshToken
+from app.models.api_key import ApiKey
+from app.models.report import Report
 
 
 __all__ = [
@@ -26,4 +28,6 @@ __all__ = [
     "Dataset",
     "ExtractionJob",
     "RefreshToken",
+    "ApiKey",
+    "Report",
 ]

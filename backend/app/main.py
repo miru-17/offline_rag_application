@@ -11,6 +11,7 @@ from app.core.config import CORS_ORIGINS
 from app.core.logging import get_logger, setup_logging
 from app.core.rate_limit import limiter
 from app.routers import users
+from app.routers.api_keys import router as api_keys_router
 from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.conversations import router as conversations_router
@@ -22,8 +23,9 @@ from app.routers.insights import router as insights_router
 from app.routers.license import router as license_router
 from app.routers.query import router as query_router
 from app.routers.rag_settings import router as rag_settings_router
+from app.routers.reports import router as reports_router
 from app.routers.system import router as system_router
-from app.services import document_ingestion_service, extraction_service, retention_service, watch_service
+from app.services import document_ingestion_service, extraction_service, report_service, retention_service, watch_service
 
 setup_logging()
 logger = get_logger("main")
@@ -44,7 +46,9 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Could not start the watched folder")
     retention_service.start()
+    report_service.start()
     yield
+    report_service.stop()
     watch_service.stop()
     retention_service.stop()
 
@@ -126,6 +130,8 @@ for router in (
     insights_router,
     datasets_router,
     extraction_router,
+    api_keys_router,
+    reports_router,
 ):
     app.include_router(router)
 

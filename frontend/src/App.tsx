@@ -18,6 +18,8 @@ const CompareDocuments = lazy(() => import("./pages/CompareDocuments"));
 const TeamSpaces = lazy(() => import("./pages/TeamSpaces"));
 const Insights = lazy(() => import("./pages/Insights"));
 const AuditLog = lazy(() => import("./pages/AuditLog"));
+const Reports = lazy(() => import("./pages/Reports"));
+const ApiKeys = lazy(() => import("./pages/ApiKeys"));
 
 function PageFallback() {
   return (
@@ -93,6 +95,8 @@ function App() {
           <Route path="/teams" element={<TeamSpaces />} />
           <Route path="/insights" element={<Insights />} />
           <Route path="/audit" element={<AuditLog />} />
+          <Route path="/reports" element={<Reports />} />
+          <Route path="/api-keys" element={<ApiKeys />} />
 
           {/* ==================== SETTINGS ==================== */}
 

@@ -35,6 +35,9 @@ const ACTION_GROUPS = [
   { value: "group", label: "Team spaces" },
   { value: "dataset", label: "Data dashboard" },
   { value: "extraction", label: "Extraction" },
+  { value: "api_key", label: "API keys" },
+  { value: "report", label: "Reports" },
+  { value: "retention", label: "Retention clean-up" },
 ];
 
 const describe = (details: Record<string, unknown> | null) =>

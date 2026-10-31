@@ -2,7 +2,7 @@ import uuid
 from typing import Callable
 
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -13,6 +13,7 @@ from app.models.user import User
 
 
 security = HTTPBearer(auto_error=False)
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 _UNAUTHORIZED = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -25,11 +26,36 @@ _UNAUTHORIZED = HTTPException(
 _PASSWORD_CHANGE_ALLOWED = {"/auth/me", "/auth/change-password", "/auth/logout", "/auth/refresh"}
 
 
+def _user_from_api_key(request: Request, raw: str, db: Session) -> User:
+    from app.services import api_key_service
+    from app.services.license_service import LicenseService
+
+    key = api_key_service.authenticate(db, raw)
+    if key is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired API key.")
+    allowed, scope = api_key_service.required_scope(request.method, request.url.path)
+    if not allowed:
+        raise HTTPException(status_code=403, detail="API keys cannot use this endpoint.")
+    if scope is not None and scope not in (key.scopes or []):
+        raise HTTPException(status_code=403, detail=f"This API key does not have the '{scope}' scope.")
+    user = key.user
+    if user is None or not user.is_active or user.tenant_id != key.tenant_id or user.role is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired API key.")
+    if not LicenseService.evaluate(db, user.tenant_id, record_time=False).has_feature("api"):
+        raise HTTPException(status_code=403, detail="Your license does not include the 'api' feature.")
+    request.state.api_key_id = str(key.id)
+    request.state.api_key_name = key.name
+    return user
+
+
 def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    api_key: str | None = Depends(api_key_header),
     db: Session = Depends(get_db),
 ) -> User:
+    if (credentials is None or not credentials.credentials) and api_key:
+        return _user_from_api_key(request, api_key, db)
     if credentials is None or not credentials.credentials:
         raise _UNAUTHORIZED
 

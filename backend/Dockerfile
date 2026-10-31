@@ -11,7 +11,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Tesseract reads scanned PDFs and photos (OCR). English + Tamil + Hindi.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-tam tesseract-ocr-hin \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-tam tesseract-ocr-hin fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # CPU-only PyTorch: avoids ~3 GB of CUDA libraries a laptop cannot use.
