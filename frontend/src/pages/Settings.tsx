@@ -35,6 +35,7 @@ import TuneRoundedIcon from "@mui/icons-material/TuneRounded";
 import { useAuth } from "../auth/AuthContext";
 import { useAppearance } from "../context/AppearanceContext";
 import { changePassword } from "../api/settings.api";
+import MfaSettings from "../components/rag/MfaSettings";
 import {
   getRAGSettings,
   updateRAGSettings,
@@ -470,6 +471,7 @@ export default function Settings() {
               </Box>
             </Box>
 
+            {user?.auth_source !== "ldap" && (
             <Button
               variant="outlined"
               startIcon={<LockResetRoundedIcon />}
@@ -481,6 +483,7 @@ export default function Settings() {
             >
               Update Password
             </Button>
+            )}
           </Box>
 
           <Divider sx={{ mb: 2.5 }} />
@@ -504,6 +507,9 @@ export default function Settings() {
               </Typography>
             </Grid>
           </Grid>
+
+          <Divider sx={{ mt: 2.5 }} />
+          <MfaSettings />
         </CardContent>
       </Card>
 

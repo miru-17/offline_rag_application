@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.security import hash_password
+from app.core.security import generate_temporary_password, hash_password
 from app.database.connection import get_db
 from app.dependencies.auth import require_roles
 from app.models.group import GroupMember
@@ -18,7 +18,7 @@ from app.schemas.users import (
     UpdateUserRoleRequest,
     UpdateUserStatusRequest,
 )
-from app.services import audit_service
+from app.services import audit_service, mfa_service, session_service
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -33,6 +33,9 @@ def _serialize(user: User) -> dict:
         "is_active": user.is_active,
         "groups": sorted(m.group.name for m in user.group_memberships if m.group),
         "last_login_at": user.last_login_at,
+        "mfa_enabled": user.mfa_enabled,
+        "auth_source": user.auth_source,
+        "must_change_password": user.must_change_password,
     }
 
 
@@ -142,11 +145,61 @@ def update_user_status(
     user.is_active = payload.is_active
     if not payload.is_active:
         user.token_version = (user.token_version or 0) + 1
+        session_service.revoke_all_for_user(db, user.id)
     db.commit()
     db.refresh(user)
 
     audit_service.record("user.activated" if payload.is_active else "user.deactivated", actor=current_user,
                          target_type="user", target_id=user.id, target_label=user.username, request=request)
+    return _serialize(user)
+
+
+@router.post("/{user_id}/reset-password")
+def reset_password(
+    request: Request,
+    user_id: uuid.UUID,
+    current_user: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """
+    Give a user a one-time temporary password. They must choose a new one at
+    their next sign-in; all their current sessions end now. The temporary
+    password is shown once and never stored in readable form.
+    """
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Use Settings to change your own password.")
+    user = _get_tenant_user(db, user_id, current_user)
+    if user.auth_source == "ldap":
+        raise HTTPException(status_code=400, detail="This user's password is managed in Active Directory.")
+
+    temporary = generate_temporary_password()
+    user.password_hash = hash_password(temporary)
+    user.must_change_password = True
+    user.token_version = (user.token_version or 0) + 1
+    session_service.revoke_all_for_user(db, user.id)
+    db.commit()
+
+    audit_service.record("user.password_reset", actor=current_user, target_type="user", target_id=user.id,
+                         target_label=user.username, request=request)
+    return {"username": user.username, "temporary_password": temporary}
+
+
+@router.post("/{user_id}/mfa/reset", response_model=ManagedUserResponse)
+def reset_mfa(
+    request: Request,
+    user_id: uuid.UUID,
+    current_user: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Turn off two-step login for a user who lost their phone."""
+    user = _get_tenant_user(db, user_id, current_user)
+    mfa_service.disable(user)
+    user.token_version = (user.token_version or 0) + 1
+    session_service.revoke_all_for_user(db, user.id)
+    db.commit()
+    db.refresh(user)
+    audit_service.record("user.mfa_reset", actor=current_user, target_type="user", target_id=user.id,
+                         target_label=user.username, request=request)
     return _serialize(user)
 
 

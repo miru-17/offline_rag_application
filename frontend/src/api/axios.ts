@@ -1,8 +1,8 @@
-import axios from "axios";
+import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000";
+import { API_BASE_URL, getAccessToken, redirectToLogin, refreshSession } from "./tokens";
+
+export { API_BASE_URL };
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -11,37 +11,29 @@ const apiClient = axios.create({
   },
 });
 
-apiClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem("access_token");
+apiClient.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  },
-);
+const NO_REFRESH = ["/auth/login", "/auth/refresh", "/auth/mfa/verify", "/auth/register"];
 
 apiClient.interceptors.response.use(
-  (response) => {
-    return response;
-  },
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem("access_token");
+  (response) => response,
+  async (error: AxiosError) => {
+    const original = error.config as (InternalAxiosRequestConfig & { _retried?: boolean }) | undefined;
+    const url = original?.url ?? "";
 
-      const currentPath = window.location.pathname;
-
-      if (
-        currentPath !== "/login" &&
-        currentPath !== "/signup"
-      ) {
-        window.location.href = "/login";
+    if (error.response?.status === 401 && original && !original._retried && !NO_REFRESH.some((p) => url.includes(p))) {
+      original._retried = true;
+      if (await refreshSession()) {
+        original.headers.Authorization = `Bearer ${getAccessToken()}`;
+        return apiClient(original);
       }
+      redirectToLogin();
     }
 
     return Promise.reject(error);

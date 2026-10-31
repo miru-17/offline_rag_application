@@ -14,6 +14,10 @@ import {
   Box,
   Button,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   IconButton,
   InputAdornment,
   Link,
@@ -522,7 +526,27 @@ function TrustBadge({
 
 export default function Login() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, completeMfa } = useAuth();
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaError, setMfaError] = useState("");
+  const [mfaBusy, setMfaBusy] = useState(false);
+
+  const submitMfa = async () => {
+    if (!mfaToken) return;
+    setMfaBusy(true);
+    setMfaError("");
+    try {
+      await completeMfa(mfaToken, mfaCode.trim());
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setMfaError(typeof detail === "string" ? detail : "The code is not correct.");
+      if (typeof detail === "string" && detail.includes("expired")) setMfaToken(null);
+    } finally {
+      setMfaBusy(false);
+    }
+  };
 
   const [mode, setMode] = useState<Mode>("login");
   const isSignup = mode === "signup";
@@ -718,16 +742,28 @@ export default function Login() {
     // ---------------------------------------------------------
 
     try {
-      await login(values.username.trim(), values.password);
+      const challenge = await login(values.username.trim(), values.password);
+
+      if (challenge?.mfaRequired) {
+        setMfaToken(challenge.mfaToken);
+        setMfaCode("");
+        setMfaError("");
+        setIsSubmitting(false);
+        return;
+      }
 
       navigate("/dashboard", { replace: true });
     } catch (loginError) {
+      const response = (loginError as { response?: { status?: number; data?: { detail?: unknown } } })?.response;
+      const detail = typeof response?.data?.detail === "string" ? response.data.detail : null;
       setNotice({
         type: "error",
         message:
-          loginError instanceof TypeError
+          loginError instanceof TypeError || (!response && (loginError as { code?: string })?.code === "ERR_NETWORK")
             ? "Can't reach the server. Check your connection and try again."
-            : "The username or password is incorrect. Check your details and try again.",
+            : response?.status === 401 || !detail
+              ? "The username or password is incorrect. Check your details and try again."
+              : detail,
       });
 
       setIsSubmitting(false);
@@ -1258,6 +1294,33 @@ export default function Login() {
           </Paper>
         </Box>
       </Box>
+
+      <Dialog open={mfaToken !== null} onClose={() => !mfaBusy && setMfaToken(null)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Two-step verification</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Enter the 6-digit code from your authenticator app.
+          </Typography>
+          {mfaError && <Alert severity="error" sx={{ mb: 2 }}>{mfaError}</Alert>}
+          <TextField
+            autoFocus
+            fullWidth
+            label="Code"
+            value={mfaCode}
+            onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && mfaCode.length === 6) void submitMfa();
+            }}
+            slotProps={{ htmlInput: { inputMode: "numeric", autoComplete: "one-time-code", "aria-label": "Authentication code" } }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMfaToken(null)} disabled={mfaBusy}>Cancel</Button>
+          <Button variant="contained" onClick={() => void submitMfa()} disabled={mfaBusy || mfaCode.length !== 6}>
+            {mfaBusy ? "Checking…" : "Verify"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

@@ -34,3 +34,21 @@ class ChangePasswordRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=20, max_length=200)
+
+
+class MfaVerifyRequest(BaseModel):
+    mfa_token: str = Field(max_length=2000)
+    code: str = Field(min_length=6, max_length=10)
+
+
+class MfaCodeRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=10)
+
+
+class MfaDisableRequest(BaseModel):
+    password: str = Field(max_length=200)
+    code: str = Field(min_length=6, max_length=10)

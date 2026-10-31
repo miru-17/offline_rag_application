@@ -59,6 +59,8 @@ import {
   getUsers,
   updateUserRole,
   updateUserStatus,
+  resetUserPassword,
+  resetUserMfa,
   type ManagedUser,
 } from "../api/users.api";
 
@@ -235,6 +237,36 @@ export default function Users() {
       setError(message);
     } finally {
       setIsUpdatingRole(false);
+    }
+  };
+
+  const [tempPassword, setTempPassword] = useState<{ username: string; temporary_password: string } | null>(null);
+
+  const handleResetPassword = async () => {
+    if (!selectedUser) return;
+    const target = selectedUser;
+    handleMenuClose();
+    try {
+      setError("");
+      setTempPassword(await resetUserPassword(target.id));
+      setUsers((prev) => prev.map((u) => (u.id === target.id ? { ...u, must_change_password: true } : u)));
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Failed to reset the password.");
+    }
+  };
+
+  const handleResetMfa = async () => {
+    if (!selectedUser) return;
+    const target = selectedUser;
+    handleMenuClose();
+    try {
+      setError("");
+      const updated = await resetUserMfa(target.id);
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      setSuccessMessage(`Two-step login turned off for "${updated.username}".`);
+      setSnackbarOpen(true);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Failed to reset two-step login.");
     }
   };
 
@@ -477,6 +509,9 @@ export default function Users() {
                           <Typography variant="body2" color="text.secondary">
                             {managedUser.email}
                             {managedUser.is_active === false && " · Deactivated"}
+                            {managedUser.auth_source === "ldap" && " · Active Directory"}
+                            {managedUser.mfa_enabled && " · 2-step on"}
+                            {managedUser.must_change_password && " · must change password"}
                             {managedUser.groups && managedUser.groups.length > 0 && ` · ${managedUser.groups.join(", ")}`}
                           </Typography>
                         </TableCell>
@@ -528,6 +563,18 @@ export default function Users() {
           <EditOutlined fontSize="small" sx={{ mr: 1.5, color: "text.secondary" }} />
           Modify Role
         </MenuItem>
+
+        {selectedUser?.id !== currentUserId && selectedUser?.auth_source !== "ldap" && (
+          <MenuItem onClick={() => void handleResetPassword()} sx={{ fontSize: "0.85rem" }}>
+            Reset password
+          </MenuItem>
+        )}
+
+        {selectedUser?.mfa_enabled && (
+          <MenuItem onClick={() => void handleResetMfa()} sx={{ fontSize: "0.85rem" }}>
+            Turn off two-step login
+          </MenuItem>
+        )}
 
         {selectedUser?.id !== currentUserId && (
           <MenuItem onClick={() => void handleToggleActive()} sx={{ fontSize: "0.85rem" }}>
@@ -715,6 +762,23 @@ export default function Users() {
         onClose={() => setSnackbarOpen(false)}
         message={successMessage}
       />
+      <Dialog open={tempPassword !== null} onClose={() => setTempPassword(null)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Temporary password</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Give this password to <b>{tempPassword?.username}</b> in person or by phone. It is shown only once.
+            They must choose a new password when they sign in. Their other sessions have been signed out.
+          </Typography>
+          <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: "action.hover", fontFamily: "monospace", fontSize: "1.25rem",
+                     textAlign: "center", letterSpacing: 1, userSelect: "all" }}>
+            {tempPassword?.temporary_password}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => void navigator.clipboard.writeText(tempPassword?.temporary_password ?? "")}>Copy</Button>
+          <Button variant="contained" onClick={() => setTempPassword(null)}>Done</Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

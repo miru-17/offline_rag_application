@@ -1,7 +1,7 @@
 import uuid
 from typing import Callable
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -21,7 +21,12 @@ _UNAUTHORIZED = HTTPException(
 )
 
 
+# Paths a user may still call while a password change is required.
+_PASSWORD_CHANGE_ALLOWED = {"/auth/me", "/auth/change-password", "/auth/logout", "/auth/refresh"}
+
+
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
@@ -51,6 +56,12 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is not fully configured",
+        )
+
+    if user.must_change_password and request.url.path.rstrip("/") not in _PASSWORD_CHANGE_ALLOWED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password change required. Choose a new password to continue.",
         )
 
     return user

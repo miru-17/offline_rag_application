@@ -119,3 +119,26 @@ LICENSE_PUBLIC_KEY_PATH = Path(
 )
 
 PRODUCT_NAME = "RAGENTIS"
+
+# ------------------------------------------------------------------
+# Sessions, MFA, directory login
+# ------------------------------------------------------------------
+
+REFRESH_TOKEN_DAYS = _int("REFRESH_TOKEN_DAYS", 14)
+MFA_ISSUER = os.getenv("MFA_ISSUER", "RAGENTIS")
+
+# Optional separate key for encrypting stored secrets (MFA). When unset, a
+# key is derived from JWT_SECRET_KEY (changing that secret then requires
+# users to set up MFA again).
+DATA_ENCRYPTION_KEY = os.getenv("DATA_ENCRYPTION_KEY", "")
+
+LDAP_ENABLED = _bool("LDAP_ENABLED", False)
+LDAP_SERVER_URL = os.getenv("LDAP_SERVER_URL", "")          # ldaps://dc01.corp.local:636
+LDAP_BIND_TEMPLATE = os.getenv("LDAP_BIND_TEMPLATE", "{username}")  # e.g. {username}@corp.local
+LDAP_SEARCH_BASE = os.getenv("LDAP_SEARCH_BASE", "")        # dc=corp,dc=local
+LDAP_USER_FILTER = os.getenv("LDAP_USER_FILTER", "(sAMAccountName={username})")
+LDAP_EMAIL_ATTRIBUTE = os.getenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+# "CN=RAG-Admins,OU=Groups,DC=corp,DC=local=ADMIN;CN=RAG-Users,...=USER"
+LDAP_GROUP_ROLE_MAP = os.getenv("LDAP_GROUP_ROLE_MAP", "")
+LDAP_DEFAULT_ROLE = os.getenv("LDAP_DEFAULT_ROLE", "VIEWER")
+LDAP_TIMEOUT_SECONDS = _int("LDAP_TIMEOUT_SECONDS", 5)

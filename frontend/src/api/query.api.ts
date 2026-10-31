@@ -1,4 +1,5 @@
-import apiClient, { API_BASE_URL } from "./axios";
+import apiClient from "./axios";
+import { API_BASE_URL, getAccessToken, redirectToLogin, refreshSession } from "./tokens";
 
 export interface QuerySource {
   ref?: number;
@@ -62,16 +63,22 @@ export const streamQuery = async (
   handlers: StreamHandlers,
   signal: AbortSignal,
 ): Promise<void> => {
-  const token = localStorage.getItem("access_token");
-  const response = await fetch(`${API_BASE_URL}/query/stream`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ query, conversation_id: conversationId ?? null }),
-    signal,
-  });
+  const send = () => {
+    const token = getAccessToken();
+    return fetch(`${API_BASE_URL}/query/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ query, conversation_id: conversationId ?? null }),
+      signal,
+    });
+  };
+  let response = await send();
+  if (response.status === 401 && (await refreshSession())) {
+    response = await send();
+  }
 
   if (!response.ok || !response.body) {
     let detail = "Unable to process your question.";
@@ -82,8 +89,7 @@ export const streamQuery = async (
       /* ignore */
     }
     if (response.status === 401) {
-      localStorage.removeItem("access_token");
-      window.location.href = "/login";
+      redirectToLogin();
     }
     handlers.onError?.(detail);
     return;

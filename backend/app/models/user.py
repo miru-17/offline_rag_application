@@ -70,6 +70,32 @@ class User(Base):
         nullable=True,
     )
 
+    # Set after an admin password reset: the user must choose a new password.
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
+    # "local" (password stored here) or "ldap" (checked against Active Directory).
+    auth_source: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="local",
+        server_default="local",
+    )
+
+    # Two-step login (TOTP authenticator app). Secrets are stored encrypted.
+    mfa_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    mfa_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    mfa_pending_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     group_memberships = relationship(
         "GroupMember",
         back_populates="user",

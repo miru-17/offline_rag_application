@@ -9,6 +9,7 @@ from app.models.message import Message
 from app.models.audit_event import AuditEvent
 from app.models.dataset import Dataset
 from app.models.extraction_job import ExtractionJob
+from app.models.refresh_token import RefreshToken
 
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "AuditEvent",
     "Dataset",
     "ExtractionJob",
+    "RefreshToken",
 ]

@@ -46,6 +46,9 @@ class ManagedUserResponse(BaseModel):
     is_active: bool = True
     groups: list[str] = []
     last_login_at: datetime | None = None
+    mfa_enabled: bool = False
+    auth_source: str = "local"
+    must_change_password: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

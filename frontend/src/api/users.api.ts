@@ -9,6 +9,9 @@ export interface ManagedUser {
   is_active?: boolean;
   groups?: string[];
   last_login_at?: string | null;
+  mfa_enabled?: boolean;
+  auth_source?: "local" | "ldap";
+  must_change_password?: boolean;
 }
 
 export interface CreateUserRequest {
@@ -63,3 +66,10 @@ export const updateUserStatus = async (userId: string, isActive: boolean): Promi
   const response = await apiClient.patch<ManagedUser>(`/users/${userId}/status`, { is_active: isActive });
   return response.data;
 };
+
+
+export const resetUserPassword = async (userId: string): Promise<{ username: string; temporary_password: string }> =>
+  (await apiClient.post(`/users/${userId}/reset-password`)).data;
+
+export const resetUserMfa = async (userId: string): Promise<ManagedUser> =>
+  (await apiClient.post<ManagedUser>(`/users/${userId}/mfa/reset`)).data;

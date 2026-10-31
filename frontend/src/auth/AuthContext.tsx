@@ -10,14 +10,26 @@ import {
 import {
   getCurrentUser,
   loginUser,
+  logoutSession,
+  verifyMfa,
   type CurrentUser,
+  type LoginResponse,
 } from "../api/auth.api";
+import { clearTokens, getAccessToken, getRefreshToken, storeTokens } from "../api/tokens";
+
+/** Returned by login() when the account has two-step login switched on. */
+export interface MfaChallenge {
+  mfaRequired: true;
+  mfaToken: string;
+}
 
 interface AuthContextValue {
   user: CurrentUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<MfaChallenge | void>;
+  completeMfa: (mfaToken: string, code: string) => Promise<void>;
+  refreshUser: () => Promise<void>;
   logout: () => void;
 }
 
@@ -31,94 +43,72 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Logout
   const logout = useCallback(() => {
-    localStorage.removeItem("access_token");
+    const refreshToken = getRefreshToken();
+    if (refreshToken) {
+      // End the session on the server too; ignore network errors.
+      void logoutSession(refreshToken).catch(() => undefined);
+    }
+    clearTokens();
     setUser(null);
   }, []);
 
-  // Load currently authenticated user
   const loadCurrentUser = useCallback(async () => {
-    const token = localStorage.getItem("access_token");
-
-    // No token = not logged in
-    if (!token) {
+    if (!getAccessToken() && !getRefreshToken()) {
       setUser(null);
       setIsLoading(false);
       return;
     }
-
     try {
-      const currentUser = await getCurrentUser();
-
-      console.log("CURRENT USER:", currentUser);
-
-      setUser(currentUser);
-    } catch (error) {
-      console.error("GET /auth/me failed:", error);
-
-      /*
-       * If the token is invalid/expired, remove it.
-       * This prevents an invalid token from being reused.
-       */
-      logout();
+      // An expired access token is refreshed automatically by the API client.
+      setUser(await getCurrentUser());
+    } catch {
+      clearTokens();
+      setUser(null);
     } finally {
       setIsLoading(false);
     }
-  }, [logout]);
+  }, []);
 
-  // Check authentication when application starts
   useEffect(() => {
     void loadCurrentUser();
   }, [loadCurrentUser]);
 
-  // Login
-  const login = async (username: string, password: string) => {
-    setIsLoading(true);
-
+  const finish = async (response: LoginResponse) => {
+    if (!response.access_token) throw new Error("Sign-in did not return a session.");
+    storeTokens({ access_token: response.access_token, refresh_token: response.refresh_token });
     try {
-      console.log("LOGIN STARTED");
+      setUser(await getCurrentUser());
+    } catch {
+      throw new Error("Login successful, but your user profile could not be loaded.");
+    }
+  };
 
-      // Step 1: Login API
-      const response = await loginUser({
-        username,
-        password,
-      });
-
-      console.log("LOGIN API SUCCESS");
-
-      // Step 2: Save JWT
-      localStorage.setItem("access_token", response.access_token);
-
-      console.log("ACCESS TOKEN SAVED");
-
-      // Step 3: Get logged-in user
-      try {
-        const currentUser = await getCurrentUser();
-
-        console.log("AUTH ME SUCCESS:", currentUser);
-
-        // Step 4: Store user in React state
-        setUser(currentUser);
-      } catch (error) {
-        console.error("AUTH ME FAILED:", error);
-
-        /*
-         * Login itself succeeded.
-         * /auth/me is the endpoint currently failing.
-         */
-        throw new Error(
-          "Login successful, but your user profile could not be loaded.",
-        );
+  const login = async (username: string, password: string): Promise<MfaChallenge | void> => {
+    setIsLoading(true);
+    try {
+      const response = await loginUser({ username, password });
+      if (response.mfa_required && response.mfa_token) {
+        return { mfaRequired: true, mfaToken: response.mfa_token };
       }
-    } catch (error) {
-      console.error("LOGIN FLOW ERROR:", error);
-
-      throw error;
+      await finish(response);
     } finally {
       setIsLoading(false);
     }
   };
+
+  const completeMfa = async (mfaToken: string, code: string) => {
+    setIsLoading(true);
+    try {
+      await finish(await verifyMfa(mfaToken, code));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const refreshUser = useCallback(async () => {
+    setUser(await getCurrentUser());
+  }, []);
 
   return (
     <AuthContext.Provider
@@ -127,6 +117,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         isAuthenticated: Boolean(user),
         isLoading,
         login,
+        completeMfa,
+        refreshUser,
         logout,
       }}
     >
@@ -135,6 +127,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
 

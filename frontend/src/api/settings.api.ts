@@ -1,4 +1,5 @@
 import apiClient from "./axios";
+import { storeTokens } from "./tokens";
 
 export interface ChangePasswordRequest {
   current_password: string;
@@ -8,6 +9,7 @@ export interface ChangePasswordRequest {
 export interface ChangePasswordResponse {
   message: string;
   access_token?: string;
+  refresh_token?: string;
 }
 
 export const changePassword = async (
@@ -20,7 +22,7 @@ export const changePassword = async (
 
   // Old sessions are revoked on the server; keep this one signed in.
   if (response.data.access_token) {
-    localStorage.setItem("access_token", response.data.access_token);
+    storeTokens({ access_token: response.data.access_token, refresh_token: response.data.refresh_token });
   }
 
   return response.data;

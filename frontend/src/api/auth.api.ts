@@ -6,8 +6,12 @@ export interface LoginRequest {
 }
 
 export interface LoginResponse {
-  access_token: string;
-  token_type: string;
+  access_token?: string;
+  refresh_token?: string;
+  token_type?: string;
+  must_change_password?: boolean;
+  mfa_required?: boolean;
+  mfa_token?: string;
 }
 
 export interface RegisterRequest {
@@ -35,6 +39,9 @@ export interface CurrentUser {
   role: "ADMIN" | "USER" | "VIEWER";
   tenant_id: string;
   tenant_name: string;
+  auth_source?: "local" | "ldap";
+  mfa_enabled?: boolean;
+  must_change_password?: boolean;
 }
 
 export const loginUser = async (
@@ -68,9 +75,29 @@ export const getCurrentUser = async (): Promise<CurrentUser> => {
 export interface SetupStatus {
   needs_setup: boolean;
   self_registration: boolean;
+  directory_login?: boolean;
 }
 
 export const getSetupStatus = async (): Promise<SetupStatus> => {
   const response = await apiClient.get<SetupStatus>("/auth/setup-status");
   return response.data;
+};
+
+
+export const verifyMfa = async (mfaToken: string, code: string): Promise<LoginResponse> =>
+  (await apiClient.post<LoginResponse>("/auth/mfa/verify", { mfa_token: mfaToken, code })).data;
+
+export const logoutSession = async (refreshToken: string): Promise<void> => {
+  await apiClient.post("/auth/logout", { refresh_token: refreshToken });
+};
+
+export const startMfaSetup = async (): Promise<{ secret: string; otpauth_uri: string }> =>
+  (await apiClient.post("/auth/mfa/setup")).data;
+
+export const enableMfa = async (code: string): Promise<void> => {
+  await apiClient.post("/auth/mfa/enable", { code });
+};
+
+export const disableMfa = async (password: string, code: string): Promise<void> => {
+  await apiClient.post("/auth/mfa/disable", { password, code });
 };
