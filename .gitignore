@@ -47,3 +47,11 @@ Thumbs.db
 license_signing_key*.pem
 **/chroma.sqlite3
 backend/server.log
+
+# Watched folder, certificates and backups (local data, never committed)
+watch/*
+!watch/.gitkeep
+certs/*
+!certs/.gitkeep
+backups/
+dist-offline/

@@ -23,6 +23,13 @@ echo "Restoring files and vector index..."
 docker compose run --rm -T --no-deps --entrypoint sh backend -c \
   "rm -rf /app/uploads/* /app/chroma_db/* && tar -C /app -xzf - " < "$SRC/uploads.tar.gz"
 docker compose run --rm -T --no-deps --entrypoint sh backend -c "tar -C /app -xzf -" < "$SRC/chroma_db.tar.gz"
+if [ -f "$SRC/reports.tar.gz" ]; then
+  docker compose run --rm -T --no-deps --entrypoint sh backend -c \
+    "rm -rf /app/reports/* && tar -C /app -xzf -" < "$SRC/reports.tar.gz"
+fi
+# The API runs as user 10001; restored files must belong to it.
+docker compose run --rm -T --no-deps --entrypoint sh backend -c \
+  "chown -R 10001:10001 /app/uploads /app/chroma_db /app/reports"
 
 docker compose start backend
 echo "Restore complete."

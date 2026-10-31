@@ -55,9 +55,33 @@ services:
       ENABLE_API_DOCS: "${ENABLE_API_DOCS:-false}"
       LLM_MAX_CONCURRENCY: "1"
       INGESTION_CONCURRENCY: "1"
+      # Requests arrive through the web container; trust its X-Forwarded-For
+      # so audit entries and rate limits see the real client address.
+      FORWARDED_ALLOW_IPS: "*"
+      OLLAMA_ALLOWED_MODELS: "${OLLAMA_ALLOWED_MODELS:-}"
+      EMBEDDING_MODEL: "${EMBEDDING_MODEL:-all-MiniLM-L6-v2}"
+      HYBRID_SEARCH: "${HYBRID_SEARCH:-true}"
+      OCR_ENABLED: "${OCR_ENABLED:-true}"
+      OCR_LANGUAGES: "${OCR_LANGUAGES:-eng}"
+      WATCH_FOLDER: "/app/watch"
+      WATCH_OWNER: "${WATCH_OWNER:-}"
+      DATA_ENCRYPTION_KEY: "${DATA_ENCRYPTION_KEY:-}"
+      MFA_ISSUER: "${MFA_ISSUER:-RAGENTIS}"
+      REFRESH_TOKEN_DAYS: "${REFRESH_TOKEN_DAYS:-14}"
+      LDAP_ENABLED: "${LDAP_ENABLED:-false}"
+      LDAP_SERVER_URL: "${LDAP_SERVER_URL:-}"
+      LDAP_BIND_TEMPLATE: "${LDAP_BIND_TEMPLATE:-}"
+      LDAP_SEARCH_BASE: "${LDAP_SEARCH_BASE:-}"
+      LDAP_USER_FILTER: "${LDAP_USER_FILTER:-}"
+      LDAP_EMAIL_ATTRIBUTE: "${LDAP_EMAIL_ATTRIBUTE:-mail}"
+      LDAP_GROUP_ROLE_MAP: "${LDAP_GROUP_ROLE_MAP:-}"
+      LDAP_DEFAULT_ROLE: "${LDAP_DEFAULT_ROLE:-}"
     volumes:
       - rag_uploads:/app/uploads
       - rag_chroma:/app/chroma_db
+      - rag_reports:/app/reports
+      # Watched folder: files copied here are added automatically (read-only for RAGENTIS).
+      - "${RAGENTIS_WATCH_DIR:-./watch}:/app/watch:ro"
       # Keeps the downloaded embedding model, so it is fetched only once.
       - hf_cache:/hf_cache
     # Use 0.0.0.0:8000:8000 only when other office computers must connect,
@@ -65,9 +89,34 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
 
+  # Web server: the app at https://localhost:8443 and the API under /api.
+  web:
+    build: ./frontend
+    image: ragentis-web:latest
+    container_name: ragentis-web
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      RAGENTIS_HOSTS: "${RAGENTIS_HOSTS:-localhost 127.0.0.1}"
+      RAGENTIS_TLS: "${RAGENTIS_TLS:-internal}"
+      RAGENTIS_HTTPS_PORT: "${RAGENTIS_HTTPS_PORT:-8443}"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - "${RAGENTIS_CERTS_DIR:-./certs}:/certs:ro"
+    # 127.0.0.1 = only this computer. Set RAGENTIS_BIND=0.0.0.0 in .env so
+    # other office computers can open https://<this-computer>:8443
+    ports:
+      - "${RAGENTIS_BIND:-127.0.0.1}:${RAGENTIS_HTTPS_PORT:-8443}:443"
+      - "${RAGENTIS_BIND:-127.0.0.1}:${RAGENTIS_HTTP_PORT:-8080}:80"
+
 volumes:
   postgres_data:
   ollama_data:
   rag_uploads:
   rag_chroma:
   hf_cache:
+  rag_reports:
+  caddy_data:
+  caddy_config:

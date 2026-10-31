@@ -21,6 +21,12 @@ def _bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env(name: str, default: str) -> str:
+    """Like os.getenv, but an empty value (e.g. from docker compose "${X:-}") means "use the default"."""
+    value = os.getenv(name)
+    return value.strip() if value and value.strip() else default
+
+
 def _int(name: str, default: int) -> int:
     try:
         return int(os.getenv(name, str(default)))
@@ -125,7 +131,7 @@ PRODUCT_NAME = "RAGENTIS"
 # ------------------------------------------------------------------
 
 REFRESH_TOKEN_DAYS = _int("REFRESH_TOKEN_DAYS", 14)
-MFA_ISSUER = os.getenv("MFA_ISSUER", "RAGENTIS")
+MFA_ISSUER = _env("MFA_ISSUER", "RAGENTIS")
 
 # Optional separate key for encrypting stored secrets (MFA). When unset, a
 # key is derived from JWT_SECRET_KEY (changing that secret then requires
@@ -134,13 +140,13 @@ DATA_ENCRYPTION_KEY = os.getenv("DATA_ENCRYPTION_KEY", "")
 
 LDAP_ENABLED = _bool("LDAP_ENABLED", False)
 LDAP_SERVER_URL = os.getenv("LDAP_SERVER_URL", "")          # ldaps://dc01.corp.local:636
-LDAP_BIND_TEMPLATE = os.getenv("LDAP_BIND_TEMPLATE", "{username}")  # e.g. {username}@corp.local
+LDAP_BIND_TEMPLATE = _env("LDAP_BIND_TEMPLATE", "{username}")  # e.g. {username}@corp.local
 LDAP_SEARCH_BASE = os.getenv("LDAP_SEARCH_BASE", "")        # dc=corp,dc=local
-LDAP_USER_FILTER = os.getenv("LDAP_USER_FILTER", "(sAMAccountName={username})")
-LDAP_EMAIL_ATTRIBUTE = os.getenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+LDAP_USER_FILTER = _env("LDAP_USER_FILTER", "(sAMAccountName={username})")
+LDAP_EMAIL_ATTRIBUTE = _env("LDAP_EMAIL_ATTRIBUTE", "mail")
 # "CN=RAG-Admins,OU=Groups,DC=corp,DC=local=ADMIN;CN=RAG-Users,...=USER"
 LDAP_GROUP_ROLE_MAP = os.getenv("LDAP_GROUP_ROLE_MAP", "")
-LDAP_DEFAULT_ROLE = os.getenv("LDAP_DEFAULT_ROLE", "VIEWER")
+LDAP_DEFAULT_ROLE = _env("LDAP_DEFAULT_ROLE", "VIEWER")
 LDAP_TIMEOUT_SECONDS = _int("LDAP_TIMEOUT_SECONDS", 5)
 
 # ------------------------------------------------------------------
@@ -148,7 +154,7 @@ LDAP_TIMEOUT_SECONDS = _int("LDAP_TIMEOUT_SECONDS", 5)
 # ------------------------------------------------------------------
 
 OCR_ENABLED = _bool("OCR_ENABLED", True)
-OCR_LANGUAGES = os.getenv("OCR_LANGUAGES", "eng")      # e.g. "eng+tam+hin" if installed
+OCR_LANGUAGES = _env("OCR_LANGUAGES", "eng")      # e.g. "eng+tam+hin" if installed
 OCR_MAX_PAGES = _int("OCR_MAX_PAGES", 50)
 OCR_DPI = _int("OCR_DPI", 200)
 
@@ -167,7 +173,7 @@ REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "reports"))
 HYBRID_SEARCH = os.getenv("HYBRID_SEARCH", "true").lower() == "true"
 # Embedding model. For Tamil / Hindi / other languages use
 # "paraphrase-multilingual-MiniLM-L12-v2" and re-index documents afterwards.
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+EMBEDDING_MODEL = _env("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 # Models an administrator may choose for their organisation (comma separated).
 OLLAMA_ALLOWED_MODELS = [m.strip() for m in os.getenv("OLLAMA_ALLOWED_MODELS", "").split(",") if m.strip()]
 

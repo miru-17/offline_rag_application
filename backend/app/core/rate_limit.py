@@ -6,6 +6,8 @@ the same office IP do not block each other. Anonymous requests (login,
 register) are limited per IP address.
 """
 
+import hashlib
+
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
@@ -14,6 +16,10 @@ from app.core.security import TokenError, decode_access_token
 
 
 def user_or_ip_key(request: Request) -> str:
+    api_key = request.headers.get("x-api-key", "")
+    if api_key:
+        # Each API key has its own limit (never the raw key in memory keys).
+        return "key:" + hashlib.sha256(api_key.encode()).hexdigest()[:24]
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
         try:
