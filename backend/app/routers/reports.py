@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
-from app.dependencies.license import require_feature
+from app.dependencies.license import require_feature, require_feature_read
 from app.models.report import Report
 from app.models.user import User
 from app.services import audit_service, report_service
@@ -33,7 +33,7 @@ def _serialize(report: Report) -> dict:
 
 
 @router.get("/")
-def list_reports(current_user: User = Depends(require_feature("insights", "ADMIN")), db: Session = Depends(get_db)):
+def list_reports(current_user: User = Depends(require_feature_read("insights", "ADMIN")), db: Session = Depends(get_db)):
     reports = db.scalars(select(Report).where(Report.tenant_id == current_user.tenant_id)
                          .order_by(Report.created_at.desc()).limit(200)).all()
     return {"schedule": current_user.tenant.report_schedule, "reports": [_serialize(r) for r in reports]}
@@ -79,7 +79,7 @@ def _get(db: Session, user: User, report_id: uuid.UUID) -> Report:
 @router.get("/{report_id}/file")
 def download_report(
     report_id: uuid.UUID,
-    current_user: User = Depends(require_feature("insights", "ADMIN")),
+    current_user: User = Depends(require_feature_read("insights", "ADMIN")),
     db: Session = Depends(get_db),
 ):
     report = _get(db, current_user, report_id)

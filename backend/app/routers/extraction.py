@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
-from app.dependencies.license import require_feature
+from app.dependencies.license import require_feature, require_feature_read
 from app.models.extraction_job import ExtractionJob
 from app.models.user import User
 from app.services import audit_service, extraction_service
@@ -19,6 +19,7 @@ from app.services.csv_safety import safe_cell
 router = APIRouter(prefix="/extraction", tags=["Structured extraction"])
 
 editor_access = require_feature("extraction", "ADMIN", "USER")
+editor_read = require_feature_read("extraction", "ADMIN", "USER")
 
 MAX_DOCUMENTS = 50
 MAX_FIELDS = 15
@@ -102,7 +103,7 @@ def create_job(request: Request, payload: ExtractionCreate, current_user: User =
 
 
 @router.get("/jobs")
-def list_jobs(current_user: User = Depends(editor_access), db: Session = Depends(get_db)):
+def list_jobs(current_user: User = Depends(editor_read), db: Session = Depends(get_db)):
     jobs = db.scalars(select(ExtractionJob).where(ExtractionJob.user_id == current_user.id,
                                                   ExtractionJob.tenant_id == current_user.tenant_id)
                       .order_by(ExtractionJob.created_at.desc()).limit(100)).all()
@@ -110,12 +111,12 @@ def list_jobs(current_user: User = Depends(editor_access), db: Session = Depends
 
 
 @router.get("/jobs/{job_id}")
-def get_job(job_id: uuid.UUID, current_user: User = Depends(editor_access), db: Session = Depends(get_db)):
+def get_job(job_id: uuid.UUID, current_user: User = Depends(editor_read), db: Session = Depends(get_db)):
     return _serialize(_get_job(db, current_user, job_id), full=True)
 
 
 @router.get("/jobs/{job_id}/export")
-def export_job(request: Request, job_id: uuid.UUID, current_user: User = Depends(editor_access),
+def export_job(request: Request, job_id: uuid.UUID, current_user: User = Depends(editor_read),
                db: Session = Depends(get_db)):
     job = _get_job(db, current_user, job_id)
     buffer = io.StringIO()

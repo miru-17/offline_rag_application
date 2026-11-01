@@ -12,6 +12,7 @@ from app.models.extraction_job import ExtractionJob
 from app.models.refresh_token import RefreshToken
 from app.models.api_key import ApiKey
 from app.models.report import Report
+from app.models.installation import Installation
 
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "RefreshToken",
     "ApiKey",
     "Report",
+    "Installation",
 ]

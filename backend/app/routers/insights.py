@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
-from app.dependencies.license import require_feature
+from app.dependencies.license import require_feature_read
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.user import User
@@ -36,7 +36,7 @@ def _keywords(question: str) -> list[str]:
 @router.get("/overview")
 def overview(
     days: int = Query(30, ge=1, le=365),
-    current_user: User = Depends(require_feature("insights", "ADMIN")),
+    current_user: User = Depends(require_feature_read("insights", "ADMIN")),
     db: Session = Depends(get_db),
 ):
     since = datetime.utcnow() - timedelta(days=days)
@@ -92,7 +92,7 @@ def overview(
 def knowledge_gaps(
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(25, ge=1, le=100),
-    current_user: User = Depends(require_feature("insights", "ADMIN")),
+    current_user: User = Depends(require_feature_read("insights", "ADMIN")),
     db: Session = Depends(get_db),
 ):
     since = datetime.utcnow() - timedelta(days=days)

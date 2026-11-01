@@ -13,7 +13,8 @@ def _check(db: Session, user: User, feature: str | None = None) -> None:
     if not state.usable:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"A valid license is required. {state.message}",
+            detail=f"A valid license is required. {state.message}"
+                   + (" Existing data can still be opened and exported." if state.read_only else ""),
         )
 
     if feature and not state.has_feature(feature):
@@ -21,6 +22,30 @@ def _check(db: Session, user: User, feature: str | None = None) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Your license does not include the '{feature}' feature.",
         )
+
+
+def require_feature_read(feature: str | None, *roles: str):
+    """
+    Reading and exporting existing data. Also allowed after the licence has
+    expired (read-only mode), so a customer's own data is never locked away.
+    """
+
+    role_dependency = require_roles(*roles) if roles else get_current_user
+
+    def checker(
+        current_user: User = Depends(role_dependency),
+        db: Session = Depends(get_db),
+    ) -> User:
+        state = LicenseService.evaluate(db, current_user.tenant_id)
+        if not state.can_read(feature):
+            if state.usable or state.read_only:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                    detail=f"Your license does not include the '{feature}' feature.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail=f"A valid license is required. {state.message}")
+        return current_user
+
+    return checker
 
 
 def require_valid_license(

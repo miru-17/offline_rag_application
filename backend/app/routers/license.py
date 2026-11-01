@@ -6,7 +6,10 @@ from app.database.connection import get_db
 from app.dependencies.auth import get_current_user, is_admin, require_roles
 from app.models.user import User
 from app.services import audit_service
-from app.services.license_service import LicenseError, LicenseService
+from sqlalchemy import select
+
+from app.models.audit_event import AuditEvent
+from app.services.license_service import LicenseError, LicenseService, activation_request, get_installation_id
 
 router = APIRouter(prefix="/license", tags=["License"])
 
@@ -24,6 +27,8 @@ def license_status(current_user: User = Depends(get_current_user), db: Session =
         "state": state.state,
         "message": state.message,
         "days_left": state.days_left,
+        "read_only": state.read_only,
+        "warning": state.warning,
     }
 
     if state.payload:
@@ -40,7 +45,10 @@ def license_status(current_user: User = Depends(get_current_user), db: Session =
                 "max_users": payload.get("max_users"),
                 "features": payload.get("features"),
                 "grace_days": payload.get("grace_days"),
+                "bound_to_installation": bool(payload.get("installation_id")),
             })
+    if is_admin(current_user):
+        response["installation_id"] = get_installation_id(db)
     return response
 
 
@@ -64,3 +72,33 @@ def install_license(
                          details={"expires_at": license.expires_at.isoformat(), "max_users": license.max_users},
                          request=request)
     return {"message": "Licence installed", **license_status(current_user, db)}
+
+
+@router.get("/activation-request")
+def get_activation_request(current_user: User = Depends(require_roles("ADMIN")), db: Session = Depends(get_db)):
+    """Code to send to the vendor to receive a licence bound to this installation."""
+    return activation_request(db, current_user.tenant.name if current_user.tenant else "")
+
+
+@router.get("/history")
+def license_history(current_user: User = Depends(require_roles("ADMIN")), db: Session = Depends(get_db)):
+    """Every licence installation attempt for this organisation (from the audit log)."""
+    events = db.scalars(
+        select(AuditEvent)
+        .where(AuditEvent.tenant_id == current_user.tenant_id, AuditEvent.action == "license.install")
+        .order_by(AuditEvent.created_at.desc())
+        .limit(100)
+    ).all()
+    return [
+        {
+            "at": e.created_at,
+            "by": e.actor_username,
+            "outcome": e.outcome,
+            "license_id": e.target_id,
+            "customer": e.target_label,
+            "expires_at": (e.details or {}).get("expires_at"),
+            "max_users": (e.details or {}).get("max_users"),
+            "reason": (e.details or {}).get("reason"),
+        }
+        for e in events
+    ]

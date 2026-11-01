@@ -4,6 +4,7 @@ import { Outlet, useLocation } from "react-router-dom";
 
 import Sidebar, { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH } from "./Sidebar";
 import Topbar from "./Topbar";
+import LicenseBanner from "./LicenseBanner";
 import CommandPalette from "./CommandPalette";
 import { useAppearance } from "../../context/AppearanceContext";
 import { ToastContainer } from "../common/Toast";
@@ -126,6 +127,7 @@ export default function AppLayout() {
                 }
           }
         >
+          {!fullHeight && <LicenseBanner />}
           <Outlet />
         </Box>
       </Box>

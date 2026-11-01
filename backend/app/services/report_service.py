@@ -64,7 +64,8 @@ def collect(db, tenant_id, start: datetime, end: datetime) -> dict:
         "documents_total": documents_total or 0,
         "failed_logins": failed_logins or 0,
         "users_total": users_total or 0,
-        "licence": {"state": licence.state, "days_left": licence.days_left, "message": licence.message},
+        "licence": {"state": licence.state, "days_left": licence.days_left, "message": licence.message,
+                    "warning": (licence.warning or {}).get("message")},
     }
 
 
@@ -139,6 +140,10 @@ def render_pdf(tenant_name: str, start: datetime, end: datetime, data: dict, pat
         ("Licence", f"{licence['state']} – {licence['days_left']} days left" if licence["days_left"] is not None
          else licence["state"]),
     ])
+
+    if licence.get("warning"):
+        doc.line("Action needed: " + licence["warning"], 10, bold=True)
+        doc.pdf.ln(2)
 
     doc.heading("Knowledge gaps", 13)
     doc.line("Questions the documents could not answer (who asked is not recorded here). "

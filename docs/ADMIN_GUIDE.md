@@ -174,7 +174,41 @@ network. Directory users change their password in Windows, not in RAGENTIS.
 
 ---
 
-## 8. API keys (connecting other systems)
+## 8. Licence
+
+* **Install / renew:** Licence page → *Install new licence* → choose the `.license`
+  file. The vendor sets expiry, users and features; they cannot be edited here.
+* **Reminders:** administrators see a banner 30, 15 and 7 days before expiry,
+  and the weekly report says "Action needed".
+* **After expiry** (and the grace period, normally 7 days) RAGENTIS becomes
+  **read-only**: documents, chats, dashboards, reports and the audit log can
+  still be opened and exported; uploads, questions and new work pause until the
+  renewed licence is installed. Nothing is deleted.
+* **Licence for this installation only:** Licence page → *This installation* →
+  copy the **activation request** (`RGX-REQ-…`) and send it to the vendor. The
+  licence you receive works only on this installation. A backup restored on a
+  replacement server keeps the same installation ID and keeps working.
+* **History:** every licence installation (also refused ones, with the reason)
+  is listed on the Licence page.
+
+### Vendor side (never on a customer computer)
+
+```
+python tools/license_issuer.py issue --activation-request RGX-REQ-... --days 365 --out customer.license
+python tools/license_issuer.py list --expiring 30
+python tools/license_issuer.py renew --license-id LIC-... --days 365 --out renewed.license
+python tools/license_issuer.py protect-key          # encrypt an older signing key with a passphrase
+python tools/license_issuer.py init-keys --name 2027 # new signing key for rotation
+```
+
+The signing key is encrypted with a passphrase (`RAGENTIS_SIGNING_PASSPHRASE`
+or asked). Keep the key file and the passphrase in two separate safe places.
+To retire a key, delete its public key from `app/core/license_keys/` and ship
+an update; re-issue licences with the new key first.
+
+---
+
+## 8b. API keys (connecting other systems)
 
 **API keys** page → *New API key*. Choose the account the key acts as (best: a
 dedicated account with the smallest role that is enough) and what it may do

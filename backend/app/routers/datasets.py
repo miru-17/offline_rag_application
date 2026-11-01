@@ -15,7 +15,7 @@ from app.core.config import QUERY_RATE_LIMIT, UPLOAD_RATE_LIMIT
 from app.core.rate_limit import limiter
 from app.database.connection import get_db
 from app.dependencies.auth import is_admin
-from app.dependencies.license import require_feature
+from app.dependencies.license import require_feature, require_feature_read
 from app.models.dataset import Dataset
 from app.models.user import User
 from app.services import audit_service
@@ -43,6 +43,8 @@ from app.services.ollama_service import LLMError
 router = APIRouter(prefix="/datasets", tags=["Data dashboard"])
 
 viewer_access = require_feature("analytics")
+# Viewing and exporting stay available after the licence expires (read-only mode).
+viewer_read = require_feature_read("analytics")
 editor_access = require_feature("analytics", "ADMIN", "USER")
 
 
@@ -81,7 +83,7 @@ async def _load(dataset: Dataset):
 
 
 @router.get("/")
-def list_datasets(current_user: User = Depends(viewer_access), db: Session = Depends(get_db)):
+def list_datasets(current_user: User = Depends(viewer_read), db: Session = Depends(get_db)):
     datasets = db.scalars(
         select(Dataset).where(readable_datasets_clause(current_user)).order_by(Dataset.created_at.desc())
     ).all()
@@ -148,14 +150,14 @@ async def upload_dataset(
 
 
 @router.get("/{dataset_id}")
-async def get_dataset(dataset_id: UUID, current_user: User = Depends(viewer_access), db: Session = Depends(get_db)):
+async def get_dataset(dataset_id: UUID, current_user: User = Depends(viewer_read), db: Session = Depends(get_db)):
     dataset = _get_dataset(db, current_user, dataset_id)
     frame, _ = await _load(dataset)
     return {**_serialize(dataset), "preview": preview_rows(frame)}
 
 
 @router.get("/{dataset_id}/dashboard")
-async def dataset_dashboard(dataset_id: UUID, current_user: User = Depends(viewer_access),
+async def dataset_dashboard(dataset_id: UUID, current_user: User = Depends(viewer_read),
                             db: Session = Depends(get_db)):
     dataset = _get_dataset(db, current_user, dataset_id)
     frame, columns = await _load(dataset)
@@ -167,7 +169,7 @@ async def dataset_dashboard(dataset_id: UUID, current_user: User = Depends(viewe
 
 
 @router.post("/{dataset_id}/aggregate")
-async def aggregate(dataset_id: UUID, spec: AggregateSpec, current_user: User = Depends(viewer_access),
+async def aggregate(dataset_id: UUID, spec: AggregateSpec, current_user: User = Depends(viewer_read),
                     db: Session = Depends(get_db)):
     dataset = _get_dataset(db, current_user, dataset_id)
     frame, columns = await _load(dataset)
@@ -199,7 +201,7 @@ async def ask_dataset(request: Request, dataset_id: UUID, payload: AskRequest,
 
 @router.post("/{dataset_id}/export")
 async def export_aggregate(request: Request, dataset_id: UUID, spec: AggregateSpec,
-                           current_user: User = Depends(viewer_access), db: Session = Depends(get_db)):
+                           current_user: User = Depends(viewer_read), db: Session = Depends(get_db)):
     dataset = _get_dataset(db, current_user, dataset_id)
     frame, columns = await _load(dataset)
     try:

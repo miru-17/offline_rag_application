@@ -126,6 +126,13 @@ LICENSE_PUBLIC_KEY_PATH = Path(
 
 PRODUCT_NAME = "RAGENTIS"
 
+# Extra licence public keys (key rotation): every *.pem in this folder is
+# accepted next to LICENSE_PUBLIC_KEY_PATH. Remove a file to retire a key.
+LICENSE_KEYS_DIR = Path(os.getenv("LICENSE_KEYS_DIR", str(Path(__file__).resolve().parent / "license_keys")))
+
+# Warn administrators this many days before the licence expires.
+LICENSE_WARNING_DAYS = _int("LICENSE_WARNING_DAYS", 30)
+
 # ------------------------------------------------------------------
 # Sessions, MFA, directory login
 # ------------------------------------------------------------------

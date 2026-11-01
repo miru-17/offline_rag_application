@@ -44,6 +44,7 @@ import {
   installLicense,
   type LicenseStatusResponse,
 } from "../api/license.api";
+import { LicenseActivation, LicenseHistory } from "../components/rag/LicenseExtras";
 
 /* =========================================================
    HELPERS
@@ -95,6 +96,7 @@ export default function License() {
 
   const userRole = user?.role?.toUpperCase();
   const isAdmin = userRole === "ADMIN";
+  const [historyKey, setHistoryKey] = useState(0);
 
   const loadLicense = useCallback(async (refresh = false) => {
     try {
@@ -166,11 +168,13 @@ export default function License() {
       setError(null);
       setSuccess(null);
       setLicenseData(await installLicense(newExpiryDate.trim()));
+      setHistoryKey((k) => k + 1);
       setEditOpen(false);
       setSuccess("Licence installed successfully.");
     } catch (err) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       setEditError(typeof detail === "string" ? detail : "Unable to install this licence file.");
+      setHistoryKey((k) => k + 1);
     } finally {
       setIsSaving(false);
     }
@@ -251,6 +255,18 @@ export default function License() {
       {licenseData && !licenseData.licensed && (
         <Alert severity={licenseData.state === "missing" ? "info" : "warning"} sx={{ borderRadius: 2 }}>
           {licenseData.message} Install the signed licence file from your vendor to enable uploads and chat.
+        </Alert>
+      )}
+      {licenseData?.read_only && (
+        <Alert severity="error" sx={{ borderRadius: 2 }}>
+          Read-only mode: people can still open documents, chats and dashboards and export data. Uploads, questions
+          and new work resume as soon as a renewed licence is installed.
+        </Alert>
+      )}
+      {licenseData?.state === "valid" && licenseData.warning && (
+        <Alert severity={licenseData.warning.level === "critical" ? "error" : licenseData.warning.level}
+               sx={{ borderRadius: 2 }}>
+          {licenseData.warning.message}
         </Alert>
       )}
       {licenseData?.state === "grace" && (
@@ -497,6 +513,9 @@ export default function License() {
               </Grid>
             </CardContent>
           </Card>
+
+          <LicenseActivation status={licenseData} />
+          <LicenseHistory refreshKey={historyKey} />
         </>
       )}
 

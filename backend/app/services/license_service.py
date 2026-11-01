@@ -9,13 +9,22 @@ licence file breaks the signature, and the licence is rejected.
 Licence file (JSON):
     {
       "format": "ragentis-license-v1",
+      "kid": "<id of the signing key, optional>",
       "payload": "<base64url of the JSON payload>",
       "signature": "<base64url Ed25519 signature of the payload bytes>"
     }
 
 Payload fields:
     license_id, product, customer, issued_at, not_before, expires_at,
-    max_users, features (list, "*" = all), grace_days
+    max_users, features (list, "*" = all), grace_days,
+    installation_id (optional: the licence works only on that installation)
+
+Several public keys can be trusted at once (key rotation): the main key plus
+every .pem in LICENSE_KEYS_DIR.
+
+After expiry (and the grace period) the system is READ-ONLY: people can still
+open, search their history and export their data, but uploads, questions and
+other new work are paused until a renewed licence is installed.
 """
 
 from __future__ import annotations
@@ -23,17 +32,19 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.config import LICENSE_PUBLIC_KEY_PATH, PRODUCT_NAME
+from app.core.config import LICENSE_KEYS_DIR, LICENSE_PUBLIC_KEY_PATH, LICENSE_WARNING_DAYS, PRODUCT_NAME
+from app.models.installation import Installation
 from app.models.license import License
 
 LICENSE_FORMAT = "ragentis-license-v1"
@@ -46,6 +57,7 @@ ALL_FEATURES = {
     "compare",
     "groups",
     "insights",
+    "api",
 }
 
 # Tolerated backwards clock movement before the licence is suspended.
@@ -72,23 +84,47 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-@lru_cache(maxsize=1)
-def _load_public_key() -> Ed25519PublicKey | None:
+def key_id(public_key: Ed25519PublicKey) -> str:
+    """Short, stable ID of a public key (first 16 hex of SHA-256 of the raw key)."""
+    raw = public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def _read_key(path) -> Ed25519PublicKey | None:
     try:
-        key = load_pem_public_key(LICENSE_PUBLIC_KEY_PATH.read_bytes())
+        key = load_pem_public_key(path.read_bytes())
     except (OSError, ValueError):
         return None
-    if not isinstance(key, Ed25519PublicKey):
-        return None
-    return key
+    return key if isinstance(key, Ed25519PublicKey) else None
+
+
+@lru_cache(maxsize=1)
+def trusted_keys() -> dict[str, Ed25519PublicKey]:
+    """All public keys this server accepts, by key ID."""
+    keys: dict[str, Ed25519PublicKey] = {}
+    candidates = [LICENSE_PUBLIC_KEY_PATH]
+    if LICENSE_KEYS_DIR.is_dir():
+        candidates += sorted(LICENSE_KEYS_DIR.glob("*.pem"))
+    for path in candidates:
+        key = _read_key(path)
+        if key is not None:
+            keys[key_id(key)] = key
+    return keys
+
+
+def _load_public_key() -> Ed25519PublicKey | None:
+    """Kept for older callers: the main key (or any trusted key)."""
+    keys = trusted_keys()
+    main = _read_key(LICENSE_PUBLIC_KEY_PATH)
+    return main or (next(iter(keys.values())) if keys else None)
 
 
 @lru_cache(maxsize=32)
 def verify_license_text(license_text: str) -> dict:
     """Return the verified payload, or raise LicenseError."""
 
-    public_key = _load_public_key()
-    if public_key is None:
+    keys = trusted_keys()
+    if not keys:
         raise LicenseError(
             "No licence public key is installed on this server."
         )
@@ -99,14 +135,26 @@ def verify_license_text(license_text: str) -> dict:
             raise LicenseError("Unknown licence format.")
         payload_bytes = _b64decode(envelope["payload"])
         signature = _b64decode(envelope["signature"])
+        kid = envelope.get("kid")
     except LicenseError:
         raise
     except (ValueError, KeyError, TypeError, AttributeError):
         raise LicenseError("The licence file is not valid.")
 
-    try:
-        public_key.verify(signature, payload_bytes)
-    except InvalidSignature:
+    if kid is not None:
+        if kid not in keys:
+            raise LicenseError("This licence was signed with a key this server does not trust "
+                               "(retired or unknown). Ask the vendor for a new licence.")
+        candidates = [keys[kid]]
+    else:
+        candidates = list(keys.values())
+    for public_key in candidates:
+        try:
+            public_key.verify(signature, payload_bytes)
+            break
+        except InvalidSignature:
+            continue
+    else:
         raise LicenseError("The licence signature is not valid.")
 
     try:
@@ -118,6 +166,8 @@ def verify_license_text(license_text: str) -> dict:
         payload["grace_days"] = max(0, int(payload.get("grace_days", 7)))
         payload["max_users"] = payload.get("max_users")
         payload["features"] = list(payload.get("features") or ["*"])
+        payload["installation_id"] = payload.get("installation_id") or None
+        payload["_kid"] = kid
     except LicenseError:
         raise
     except (ValueError, KeyError, TypeError):
@@ -126,9 +176,24 @@ def verify_license_text(license_text: str) -> dict:
     return payload
 
 
+def get_installation_id(db: Session) -> str:
+    """This installation's ID, created on first use."""
+    row = db.get(Installation, 1)
+    if row is None:
+        parts = [secrets.token_hex(2).upper() for _ in range(4)]
+        row = Installation(id=1, installation_id="RGI-" + "-".join(parts))
+        db.add(row)
+        try:
+            db.commit()
+        except Exception:      # another request created it at the same moment
+            db.rollback()
+            row = db.get(Installation, 1)
+    return row.installation_id
+
+
 @dataclass
 class LicenseState:
-    state: str  # valid | grace | expired | not_yet_valid | invalid | missing | clock_tampered
+    state: str  # valid | grace | expired | not_yet_valid | invalid | missing | clock_tampered | wrong_installation
     message: str
     license: License | None = None
     payload: dict | None = None
@@ -141,6 +206,35 @@ class LicenseState:
 
     def has_feature(self, name: str) -> bool:
         return self.usable and ("*" in self.features or name in self.features)
+
+    @property
+    def read_only(self) -> bool:
+        """Expired after the grace period: existing data stays readable and exportable."""
+        return self.state == "expired"
+
+    def can_read(self, name: str | None = None) -> bool:
+        if not (self.usable or self.read_only):
+            return False
+        return name is None or "*" in self.features or name in self.features
+
+    @property
+    def warning(self) -> dict | None:
+        """Banner for administrators, or None when nothing needs attention."""
+        if self.state == "valid":
+            if self.days_left is not None and self.days_left <= LICENSE_WARNING_DAYS:
+                level = "critical" if self.days_left <= 7 else ("warning" if self.days_left <= 15 else "info")
+                return {"level": level, "message": f"The licence expires in {self.days_left} day(s). "
+                                                   "Ask the vendor for the renewal licence now."}
+            return None
+        if self.state == "grace":
+            return {"level": "critical", "message": self.message + " Install the renewed licence to avoid "
+                                                                   "read-only mode."}
+        if self.state == "expired":
+            return {"level": "critical", "message": "The licence has expired. RAGENTIS is read-only: you can open "
+                                                    "and export your data, but uploads and questions are paused."}
+        if self.state == "missing":
+            return {"level": "warning", "message": "No licence is installed yet."}
+        return {"level": "critical", "message": self.message}
 
 
 class LicenseService:
@@ -182,6 +276,11 @@ class LicenseService:
             license.last_seen_at = now.replace(tzinfo=None)
             db.commit()
 
+        if payload.get("installation_id") and payload["installation_id"] != get_installation_id(db):
+            return LicenseState("wrong_installation",
+                                "This licence belongs to a different installation. Ask the vendor for a licence "
+                                "for this installation (Licence page → activation request).", license, payload)
+
         features = set(payload["features"])
         expires_at = payload["_expires_at"]
         days_left = int((expires_at - now).total_seconds() // 86400)
@@ -217,6 +316,9 @@ class LicenseService:
 
         if payload["_expires_at"] <= _utcnow() - timedelta(days=payload["grace_days"]):
             raise LicenseError("This licence has already expired.")
+        if payload.get("installation_id") and payload["installation_id"] != get_installation_id(db):
+            raise LicenseError("This licence was issued for a different installation "
+                               f"({payload['installation_id']}). This installation is {get_installation_id(db)}.")
 
         license = LicenseService.get_license(db, tenant_id)
         if license is None:
@@ -238,3 +340,17 @@ class LicenseService:
         db.commit()
         db.refresh(license)
         return license
+
+
+def activation_request(db: Session, tenant_name: str) -> dict:
+    """Code the customer sends to the vendor to get a licence bound to this installation."""
+    installation_id = get_installation_id(db)
+    body = {
+        "product": PRODUCT_NAME,
+        "installation_id": installation_id,
+        "organisation": tenant_name,
+        "requested_at": _utcnow().replace(microsecond=0).isoformat(),
+    }
+    raw = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    code = "RGX-REQ-" + base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    return {**body, "code": code}
