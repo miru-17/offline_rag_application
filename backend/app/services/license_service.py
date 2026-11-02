@@ -57,7 +57,6 @@ ALL_FEATURES = {
     "compare",
     "groups",
     "insights",
-    "api",
 }
 
 # Tolerated backwards clock movement before the licence is suspended.

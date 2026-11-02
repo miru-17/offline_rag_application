@@ -60,9 +60,6 @@ def record(
     request: Request | None = None,
     actor_username: str | None = None,
 ) -> None:
-    api_key_name = getattr(getattr(request, "state", None), "api_key_name", None) if request is not None else None
-    if api_key_name:
-        details = {**(details or {}), "via_api_key": api_key_name}
     db = SessionLocal()
     try:
         event = AuditEvent(

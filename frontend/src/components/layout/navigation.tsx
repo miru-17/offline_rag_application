@@ -12,7 +12,6 @@ import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
 import QueryStatsOutlinedIcon from "@mui/icons-material/QueryStatsOutlined";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import SummarizeOutlinedIcon from "@mui/icons-material/SummarizeOutlined";
-import KeyOutlinedIcon from "@mui/icons-material/KeyOutlined";
 
 export type Role = "ADMIN" | "USER" | "VIEWER";
 
@@ -112,14 +111,6 @@ export const NAV_ITEMS: NavItem[] = [
     icon: <GroupOutlinedIcon />,
     roles: ["ADMIN"],
     description: "Manage tenant members and permissions",
-    section: "admin",
-  },
-  {
-    label: "API keys",
-    path: "/api-keys",
-    icon: <KeyOutlinedIcon />,
-    roles: ["ADMIN"],
-    description: "Connect ERP, intranet and scripts through the REST API",
     section: "admin",
   },
   {

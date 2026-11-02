@@ -208,16 +208,6 @@ an update; re-issue licences with the new key first.
 
 ---
 
-## 8b. API keys (connecting other systems)
-
-**API keys** page → *New API key*. Choose the account the key acts as (best: a
-dedicated account with the smallest role that is enough) and what it may do
-(`query`, `documents:read`, `documents:write`). The key is shown once. A key can
-never do more than its account's role. Revoke a key at any time. See `API.md`.
-The licence must include the `api` feature.
-
----
-
 ## 9. Backup and restore
 
 **Backup** (while running; read-only):

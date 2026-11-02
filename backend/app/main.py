@@ -11,7 +11,6 @@ from app.core.config import CORS_ORIGINS
 from app.core.logging import get_logger, setup_logging
 from app.core.rate_limit import limiter
 from app.routers import users
-from app.routers.api_keys import router as api_keys_router
 from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.conversations import router as conversations_router
@@ -130,7 +129,6 @@ for router in (
     insights_router,
     datasets_router,
     extraction_router,
-    api_keys_router,
     reports_router,
 ):
     app.include_router(router)

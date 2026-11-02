@@ -1,36 +1,5 @@
 import apiClient from "./axios";
 
-export interface ApiKeyItem {
-  id: string;
-  name: string;
-  prefix: string;
-  scopes: string[];
-  user: string | null;
-  created_at: string;
-  expires_at: string | null;
-  last_used_at: string | null;
-  revoked_at: string | null;
-  state: "active" | "expired" | "revoked";
-}
-
-export interface CreatedApiKey extends ApiKeyItem {
-  key: string;
-}
-
-export const getApiKeys = async (): Promise<ApiKeyItem[]> => (await apiClient.get<ApiKeyItem[]>("/api-keys/")).data;
-
-export const getApiScopes = async (): Promise<{ scope: string; description: string }[]> =>
-  (await apiClient.get("/api-keys/scopes")).data;
-
-export const createApiKey = async (body: {
-  name: string;
-  scopes: string[];
-  expires_in_days: number | null;
-  user_id?: string;
-}): Promise<CreatedApiKey> => (await apiClient.post<CreatedApiKey>("/api-keys/", body)).data;
-
-export const revokeApiKey = async (id: string): Promise<ApiKeyItem> => (await apiClient.delete<ApiKeyItem>(`/api-keys/${id}`)).data;
-
 export interface ReportItem {
   id: string;
   kind: "weekly" | "manual";

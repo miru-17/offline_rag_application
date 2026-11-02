@@ -48,7 +48,7 @@ cp .env.example "$WORK/"
 mkdir -p "$WORK/scripts" "$WORK/docs" "$WORK/watch" "$WORK/certs"
 cp scripts/backup.sh scripts/restore.sh scripts/backup.cmd scripts/restore.cmd "$WORK/scripts/"
 cp scripts/install.sh scripts/install.ps1 scripts/install.cmd "$WORK/"
-cp docs/ADMIN_GUIDE.md docs/USER_GUIDE.md docs/API.md "$WORK/docs/"
+cp docs/ADMIN_GUIDE.md docs/USER_GUIDE.md "$WORK/docs/"
 echo "$MODELS" > "$WORK/models/MODELS.txt"
 echo "$EMBEDDING_MODEL" > "$WORK/models/EMBEDDING_MODEL.txt"
 

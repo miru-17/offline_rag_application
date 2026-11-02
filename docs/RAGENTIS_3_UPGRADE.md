@@ -12,10 +12,9 @@ is upgraded automatically on start (migration `c8d2e4f6a1b3`, adds only).
 | Answers | **Hybrid search** (exact invoice numbers / IDs + meaning); answer language (same as question or fixed); multilingual embedding option + re-index; **AI model per organisation** |
 | Data | Word / Excel **tables → Data Dashboard** |
 | Governance | **Data retention** for chats, audit log, documents (legal hold wins); weekly **PDF reports** |
-| Integration | **API keys** + REST API (`docs/API.md`) |
 | Vendor | Licence registry: `license_issuer.py list --expiring 30`, `renew`, `export` |
 | Deployment | **HTTPS web container** (app + API on https://localhost:8443); **offline installer** (`scripts/package-offline.sh` → `install.cmd` / `install.sh`); backup/restore incl. reports, Windows `.cmd` versions |
-| Docs | `ADMIN_GUIDE.md`, `USER_GUIDE.md`, `API.md`, `EULA_TEMPLATE.md` (lawyer review needed) |
+| Docs | `ADMIN_GUIDE.md`, `USER_GUIDE.md`, `EULA_TEMPLATE.md` (lawyer review needed) |
 
 ## Start on your laptop
 
@@ -34,15 +33,13 @@ is upgraded automatically on start (migration `c8d2e4f6a1b3`, adds only).
    first time → *Advanced → Continue*. (To remove the warning see ADMIN_GUIDE §3.)
 4. The developer front end still works: `cd frontend && npm install && npm run dev`
    → http://localhost:5173.
-5. Licence: the new licence feature **`api`** controls API keys. A licence issued
-   with `--features "*"` already includes it.
 
 ## Tests run
 
 | Suite | Result |
 | --- | --- |
 | Earlier API suite (2.0 features) | 143 / 143 |
-| New API suite (sessions, reset, MFA, LDAP, OCR, file viewer, versions, legal hold, tables, watched folder, hybrid search, language, model, retention, re-index, API keys, reports, vendor console) | 166 / 166 |
+| New API suite (sessions, reset, MFA, LDAP, OCR, file viewer, versions, legal hold, tables, watched folder, hybrid search, language, model, retention, re-index, reports, vendor console) | 166 / 166 |
 | HTTPS web server (Caddy): streaming, Stop, upload limits, PDF download | 8 / 8 |
 | Browser walk-through through HTTPS (all new screens, no JS or CSP errors) | 41 / 41 |
 | Backup → damage → restore round trip (scripts with a Docker stand-in) | 15 / 15 |
