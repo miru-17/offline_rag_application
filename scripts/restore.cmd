@@ -11,7 +11,7 @@ if not "%~2"=="--yes-replace-current-data" (
   echo Make a fresh backup first, then re-run with --yes-replace-current-data
   exit /b 1
 )
-powershell -NoProfile -Command "$bad=0; Get-Content '%SRC%\SHA256SUMS' | ForEach-Object { $h,$f = $_ -split '\s+',2; if ((Get-FileHash -Algorithm SHA256 (Join-Path '%SRC%' $f)).Hash.ToLower() -ne $h) { Write-Host ('Damaged: ' + $f); $bad=1 } }; exit $bad" || exit /b 1
+powershell -NoProfile -Command "$bad=0; Get-Content '%SRC%\SHA256SUMS' | ForEach-Object { $h,$f = $_.Trim() -split '\s+',2; if ((Get-FileHash -Algorithm SHA256 (Join-Path '%SRC%' $f)).Hash.ToLower() -ne $h) { Write-Host ('Damaged: ' + $f); $bad=1 } }; exit $bad" || exit /b 1
 set WORK=%SRC%
 if exist "%SRC%\database.dump.enc" (
   if not defined RAGENTIS_BACKUP_PASSPHRASE (

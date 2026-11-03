@@ -26,7 +26,7 @@ docker compose exec -T backend tar -C /app -czf - reports %ENC% > "%DEST%\report
 for %%f in (database.dump uploads.tar.gz chroma_db.tar.gz reports.tar.gz) do (
   for %%s in ("%DEST%\%%f%EXT%") do if %%~zs==0 goto :fail
 )
-powershell -NoProfile -Command "Set-Location '%DEST%'; Get-ChildItem -File | Where-Object Name -ne 'SHA256SUMS' | ForEach-Object { '{0}  {1}' -f (Get-FileHash -Algorithm SHA256 $_.Name).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii SHA256SUMS"
+powershell -NoProfile -Command "Set-Location '%DEST%'; $lines = Get-ChildItem -File | Where-Object Name -ne 'SHA256SUMS' | ForEach-Object { '{0}  {1}' -f (Get-FileHash -Algorithm SHA256 $_.Name).Hash.ToLower(), $_.Name }; [IO.File]::WriteAllText((Join-Path (Get-Location) 'SHA256SUMS'), (($lines -join [char]10) + [char]10))"
 echo Backup written to %DEST%
 if not defined EXT echo Keep it on an encrypted drive.
 echo Keep a copy of .env too (it is NOT in the backup).
