@@ -48,10 +48,8 @@ import loginBg from "../assets/login-bg.png";
 // CONFIG
 // =============================================================
 
-// Set VITE_API_BASE_URL in your .env files (Vite). Falls back to local dev.
-const API_BASE_URL: string =
-  import.meta.env.VITE_API_BASE_URL ??
-  "http://127.0.0.1:8000";
+// Same address as the app (/api), see api/tokens.ts.
+import { API_BASE_URL } from "../api/tokens";
 
 // Keep in sync with your backend validation.
 const MIN_PASSWORD_LENGTH = 8;

@@ -61,6 +61,7 @@ class RAGService:
         hybrid: bool = False,
         language: str | None = "auto",
         model: str | None = None,
+        accessible_documents: list[dict] | None = None,
     ) -> PreparedQuery:
         if not user_id or not tenant_id:
             raise ValueError("User and tenant are required for RAG.")
@@ -73,6 +74,7 @@ class RAGService:
             group_ids=group_ids,
             document_id=document_id,
             hybrid=hybrid,
+            accessible_documents=accessible_documents,
         )
 
         documents = results.get("documents", [[]])[0]
@@ -116,9 +118,11 @@ class RAGService:
         hybrid: bool = False,
         language: str | None = "auto",
         model: str | None = None,
+        accessible_documents: list[dict] | None = None,
     ) -> dict:
         prepared = self.prepare(query, user_id, tenant_id, top_k, group_ids, history,
-                                hybrid=hybrid, language=language, model=model)
+                                hybrid=hybrid, language=language, model=model,
+                                accessible_documents=accessible_documents)
         if not prepared.found:
             return {"answer": NOT_FOUND_ANSWER, "sources": [], "status": "not_found"}
 

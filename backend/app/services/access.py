@@ -31,6 +31,30 @@ def readable_documents_clause(user: User, group_ids: list[str]):
     )
 
 
+def content_readable_clause(user: User, group_ids: list[str]):
+    """SQL version of content_readable (same rules as retrieval)."""
+    group_clause = (
+        and_(Document.visibility == "GROUP", Document.group_id.in_(group_ids)) if group_ids else false()
+    )
+    return and_(
+        Document.tenant_id == user.tenant_id,
+        or_(
+            Document.visibility == "TENANT",
+            and_(Document.visibility == "PRIVATE", Document.user_id == user.id),
+            group_clause,
+        ),
+    )
+
+
+def searchable_documents(db: Session, user: User, group_ids: list[str]) -> list[dict]:
+    """id + filename of the ready documents whose text this user may search."""
+    rows = db.execute(
+        select(Document.id, Document.filename)
+        .where(content_readable_clause(user, group_ids), Document.status == "ready")
+    ).all()
+    return [{"document_id": str(i), "filename": name} for i, name in rows]
+
+
 def content_readable(user: User, document: Document, group_ids: list[str]) -> bool:
     """
     Reading document CONTENT (summary, compare, extraction) follows the same

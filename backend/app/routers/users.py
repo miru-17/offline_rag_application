@@ -1,3 +1,4 @@
+from datetime import datetime
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -36,6 +37,7 @@ def _serialize(user: User) -> dict:
         "mfa_enabled": user.mfa_enabled,
         "auth_source": user.auth_source,
         "must_change_password": user.must_change_password,
+        "locked": bool(user.locked_until and user.locked_until > datetime.utcnow()),
     }
 
 
@@ -175,6 +177,8 @@ def reset_password(
     temporary = generate_temporary_password()
     user.password_hash = hash_password(temporary)
     user.must_change_password = True
+    user.failed_login_count = 0
+    user.locked_until = None
     user.token_version = (user.token_version or 0) + 1
     session_service.revoke_all_for_user(db, user.id)
     db.commit()
@@ -182,6 +186,24 @@ def reset_password(
     audit_service.record("user.password_reset", actor=current_user, target_type="user", target_id=user.id,
                          target_label=user.username, request=request)
     return {"username": user.username, "temporary_password": temporary}
+
+
+@router.post("/{user_id}/unlock", response_model=ManagedUserResponse)
+def unlock_user(
+    request: Request,
+    user_id: uuid.UUID,
+    current_user: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """End a lockout caused by repeated wrong passwords or codes."""
+    user = _get_tenant_user(db, user_id, current_user)
+    user.failed_login_count = 0
+    user.locked_until = None
+    db.commit()
+    db.refresh(user)
+    audit_service.record("user.unlocked", actor=current_user, target_type="user", target_id=user.id,
+                         target_label=user.username, request=request)
+    return _serialize(user)
 
 
 @router.post("/{user_id}/mfa/reset", response_model=ManagedUserResponse)

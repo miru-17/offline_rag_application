@@ -12,6 +12,8 @@ export interface ManagedUser {
   mfa_enabled?: boolean;
   auth_source?: "local" | "ldap";
   must_change_password?: boolean;
+  /** Locked for a while after repeated wrong passwords or codes. */
+  locked?: boolean;
 }
 
 export interface CreateUserRequest {
@@ -70,6 +72,9 @@ export const updateUserStatus = async (userId: string, isActive: boolean): Promi
 
 export const resetUserPassword = async (userId: string): Promise<{ username: string; temporary_password: string }> =>
   (await apiClient.post(`/users/${userId}/reset-password`)).data;
+
+export const unlockUser = async (userId: string): Promise<ManagedUser> =>
+  (await apiClient.post<ManagedUser>(`/users/${userId}/unlock`)).data;
 
 export const resetUserMfa = async (userId: string): Promise<ManagedUser> =>
   (await apiClient.post<ManagedUser>(`/users/${userId}/mfa/reset`)).data;

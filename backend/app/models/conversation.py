@@ -3,13 +3,15 @@ import uuid
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import DateTime, ForeignKey, Index, String
 
 from app.database.connection import Base
 
 
 class Conversation(Base):
     __tablename__ = "conversations"
+    # "My conversations, newest first" and retention by last use.
+    __table_args__ = (Index("ix_conversations_user_updated", "user_id", "updated_at"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,

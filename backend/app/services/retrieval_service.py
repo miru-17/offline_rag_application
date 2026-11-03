@@ -146,6 +146,7 @@ class RetrievalService:
         group_ids: list[str] | None = None,
         document_id: str | None = None,
         hybrid: bool = False,
+        accessible_documents: list[dict] | None = None,
     ):
         if not query or not query.strip():
             raise ValueError("Query cannot be empty.")
@@ -158,7 +159,10 @@ class RetrievalService:
 
         matched = None
         if document_id is None:
-            accessible = self.vector_store.get_user_documents(user_id, tenant_id, group_ids)
+            # The caller usually passes the list from the database (fast, indexed);
+            # reading every chunk's metadata from the vector store is the slow fallback.
+            accessible = (accessible_documents if accessible_documents is not None
+                          else self.vector_store.get_user_documents(user_id, tenant_id, group_ids))
             matched = self._find_document_match(query, accessible)
             if matched:
                 document_id = matched["document_id"]

@@ -61,6 +61,7 @@ import {
   updateUserStatus,
   resetUserPassword,
   resetUserMfa,
+  unlockUser,
   type ManagedUser,
 } from "../api/users.api";
 
@@ -267,6 +268,21 @@ export default function Users() {
       setSnackbarOpen(true);
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Failed to reset two-step login.");
+    }
+  };
+
+  const handleUnlock = async () => {
+    if (!selectedUser) return;
+    const target = selectedUser;
+    handleMenuClose();
+    try {
+      setError("");
+      const updated = await unlockUser(target.id);
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      setSuccessMessage(`"${updated.username}" can sign in again.`);
+      setSnackbarOpen(true);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Failed to unlock the account.");
     }
   };
 
@@ -512,6 +528,7 @@ export default function Users() {
                             {managedUser.auth_source === "ldap" && " · Active Directory"}
                             {managedUser.mfa_enabled && " · 2-step on"}
                             {managedUser.must_change_password && " · must change password"}
+                            {managedUser.locked && " · locked (too many failed sign-ins)"}
                             {managedUser.groups && managedUser.groups.length > 0 && ` · ${managedUser.groups.join(", ")}`}
                           </Typography>
                         </TableCell>
@@ -567,6 +584,12 @@ export default function Users() {
         {selectedUser?.id !== currentUserId && selectedUser?.auth_source !== "ldap" && (
           <MenuItem onClick={() => void handleResetPassword()} sx={{ fontSize: "0.85rem" }}>
             Reset password
+          </MenuItem>
+        )}
+
+        {selectedUser?.locked && (
+          <MenuItem onClick={() => void handleUnlock()} sx={{ fontSize: "0.85rem" }}>
+            Unlock account
           </MenuItem>
         )}
 

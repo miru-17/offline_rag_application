@@ -1,10 +1,19 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.config import ALLOW_SELF_REGISTRATION, LOGIN_RATE_LIMIT, REGISTER_RATE_LIMIT
+from app.core.config import (
+    ALLOW_SELF_REGISTRATION,
+    LOGIN_LOCK_MINUTES,
+    LOGIN_LOCK_THRESHOLD,
+    LOGIN_RATE_LIMIT,
+    REFRESH_COOKIE_NAME,
+    REFRESH_COOKIE_SECURE,
+    REFRESH_TOKEN_DAYS,
+    REGISTER_RATE_LIMIT,
+)
 from app.core.rate_limit import limiter
 import secrets
 
@@ -131,15 +140,81 @@ def _client(request: Request) -> tuple[str | None, str | None]:
     return request.headers.get("user-agent"), (request.client.host if request.client else None)
 
 
-def _finish_login(db: Session, user: User, request: Request) -> dict:
+# ------------------------------------------------------------------
+# Session cookie: the refresh token is kept in an HttpOnly cookie, so
+# scripts in the page (and any injected script) can never read it.
+# ------------------------------------------------------------------
+
+def _cookie_secure(request: Request) -> bool:
+    if REFRESH_COOKIE_SECURE in {"true", "1", "yes"}:
+        return True
+    if REFRESH_COOKIE_SECURE in {"false", "0", "no"}:
+        return False
+    return request.url.scheme == "https"
+
+
+def _with_session_cookie(response: Response, request: Request, tokens: dict) -> dict:
+    refresh_token = tokens.pop("refresh_token", None)
+    if refresh_token:
+        response.set_cookie(
+            REFRESH_COOKIE_NAME,
+            refresh_token,
+            max_age=REFRESH_TOKEN_DAYS * 86400,
+            httponly=True,
+            secure=_cookie_secure(request),
+            samesite="strict",
+            path="/",
+        )
+    return tokens
+
+
+def _clear_session_cookie(response: Response, request: Request) -> None:
+    response.delete_cookie(REFRESH_COOKIE_NAME, path="/", httponly=True,
+                           secure=_cookie_secure(request), samesite="strict")
+
+
+def _session_token(request: Request, payload: RefreshRequest | None) -> str | None:
+    if payload is not None and payload.refresh_token:
+        return payload.refresh_token          # older clients / scripts
+    return request.cookies.get(REFRESH_COOKIE_NAME)
+
+
+# ------------------------------------------------------------------
+# Account lockout
+# ------------------------------------------------------------------
+
+_BAD_LOGIN = "Invalid username or password. After repeated failed attempts the account is locked for a while."
+
+
+def _is_locked(user: User) -> bool:
+    return user.locked_until is not None and user.locked_until > datetime.utcnow()
+
+
+def _register_failure(db: Session, user: User, request: Request, reason: str) -> None:
+    user.failed_login_count = (user.failed_login_count or 0) + 1
+    locked_now = user.failed_login_count >= LOGIN_LOCK_THRESHOLD
+    if locked_now:
+        user.locked_until = datetime.utcnow() + timedelta(minutes=LOGIN_LOCK_MINUTES)
+        user.failed_login_count = 0
+    db.commit()
+    audit_service.record("auth.login" if reason != "bad_mfa_code" else "auth.mfa", actor=user, outcome="failure",
+                         details={"reason": reason}, request=request)
+    if locked_now:
+        audit_service.record("auth.account_locked", actor=user, outcome="failure",
+                             details={"minutes": LOGIN_LOCK_MINUTES}, request=request)
+
+
+def _finish_login(db: Session, user: User, request: Request, response: Response) -> dict:
     """Password (and MFA, if enabled) accepted: start a session."""
     user.last_login_at = datetime.utcnow()
+    user.failed_login_count = 0
+    user.locked_until = None
     db.commit()
     audit_service.record("auth.login", actor=user, request=request,
                          details={"source": user.auth_source, "mfa": user.mfa_enabled})
     user_agent, ip = _client(request)
-    return {**session_service.issue_tokens(db, user, user_agent, ip),
-            "must_change_password": user.must_change_password}
+    tokens = session_service.issue_tokens(db, user, user_agent, ip)
+    return {**_with_session_cookie(response, request, tokens), "must_change_password": user.must_change_password}
 
 
 def _directory_login(db: Session, username: str, password: str, request: Request) -> User | None:
@@ -186,24 +261,28 @@ def _directory_login(db: Session, username: str, password: str, request: Request
 
 @router.post("/login")
 @limiter.limit(LOGIN_RATE_LIMIT)
-def login(request: Request, login_data: LoginRequest, db: Session = Depends(get_db)):
+def login(request: Request, response: Response, login_data: LoginRequest, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.username == login_data.username))
+
+    if user is not None and user.auth_source != "ldap" and _is_locked(user):
+        burn_password_check(login_data.password)
+        audit_service.record("auth.login", actor=user, outcome="failure", details={"reason": "locked"}, request=request)
+        raise HTTPException(status_code=401, detail=_BAD_LOGIN)
 
     if user is not None and user.auth_source == "ldap" or (user is None and ldap_service.enabled()):
         user = _directory_login(db, login_data.username, login_data.password, request)
         if user is None:
             audit_service.record("auth.login", outcome="failure", actor_username=login_data.username[:100],
                                  details={"reason": "directory_rejected"}, request=request)
-            raise HTTPException(status_code=401, detail="Invalid username or password")
+            raise HTTPException(status_code=401, detail=_BAD_LOGIN)
     elif user is None:
         burn_password_check(login_data.password)  # same timing as a real check
         audit_service.record("auth.login", outcome="failure", actor_username=login_data.username[:100],
                              details={"reason": "unknown_user"}, request=request)
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        raise HTTPException(status_code=401, detail=_BAD_LOGIN)
     elif not verify_password(login_data.password, user.password_hash):
-        audit_service.record("auth.login", actor=user, outcome="failure",
-                             details={"reason": "bad_password"}, request=request)
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        _register_failure(db, user, request, "bad_password")
+        raise HTTPException(status_code=401, detail=_BAD_LOGIN)
 
     if not user.is_active:
         audit_service.record("auth.login", actor=user, outcome="failure",
@@ -213,12 +292,12 @@ def login(request: Request, login_data: LoginRequest, db: Session = Depends(get_
     if user.mfa_enabled:
         return {"mfa_required": True, "mfa_token": create_mfa_token(str(user.id), user.token_version)}
 
-    return _finish_login(db, user, request)
+    return _finish_login(db, user, request, response)
 
 
 @router.post("/mfa/verify")
 @limiter.limit(MFA_RATE_LIMIT)
-def mfa_verify(request: Request, payload: MfaVerifyRequest, db: Session = Depends(get_db)):
+def mfa_verify(request: Request, response: Response, payload: MfaVerifyRequest, db: Session = Depends(get_db)):
     """Second step of login: the 6-digit code from the authenticator app."""
     try:
         claims = decode_mfa_token(payload.mfa_token)
@@ -229,28 +308,41 @@ def mfa_verify(request: Request, payload: MfaVerifyRequest, db: Session = Depend
     if user is None or not user.is_active or int(claims.get("ver", 0)) != user.token_version:
         raise HTTPException(status_code=401, detail="The sign-in step expired. Sign in again.")
 
+    if _is_locked(user):
+        raise HTTPException(status_code=401, detail="Too many failed attempts. Try again later.")
     if not mfa_service.verify_login(user, payload.code):
-        audit_service.record("auth.mfa", actor=user, outcome="failure", request=request)
-        raise HTTPException(status_code=401, detail="The code is not correct. Check the time on your phone.")
+        _register_failure(db, user, request, "bad_mfa_code")
+        raise HTTPException(status_code=401, detail="The code is not correct (each code works only once). "
+                                                    "Check the time on your phone.")
 
-    return _finish_login(db, user, request)
+    return _finish_login(db, user, request, response)
 
 
 @router.post("/refresh")
-def refresh(request: Request, payload: RefreshRequest, db: Session = Depends(get_db)):
-    """Exchange a refresh token for a new access token (and a new refresh token)."""
+def refresh(request: Request, response: Response, payload: RefreshRequest | None = None,
+            db: Session = Depends(get_db)):
+    """New access token from the session cookie (the cookie is renewed too)."""
+    token = _session_token(request, payload)
+    if not token:
+        raise HTTPException(status_code=401, detail="Your session has ended. Sign in again.")
     user_agent, ip = _client(request)
     try:
-        user, tokens = session_service.rotate(db, payload.refresh_token, user_agent, ip)
+        user, tokens = session_service.rotate(db, token, user_agent, ip)
     except session_service.SessionError as exc:
         audit_service.record("auth.refresh", outcome="failure", details={"reason": str(exc)}, request=request)
-        raise HTTPException(status_code=401, detail="Your session has ended. Sign in again.")
-    return {**tokens, "must_change_password": user.must_change_password}
+        _clear_session_cookie(response, request)
+        raise HTTPException(status_code=401, detail="Your session has ended. Sign in again.",
+                            headers={"set-cookie": response.headers.get("set-cookie", "")})
+    return {**_with_session_cookie(response, request, tokens), "must_change_password": user.must_change_password}
 
 
 @router.post("/logout")
-def logout(request: Request, payload: RefreshRequest, db: Session = Depends(get_db)):
-    session_service.revoke(db, payload.refresh_token)
+def logout(request: Request, response: Response, payload: RefreshRequest | None = None,
+           db: Session = Depends(get_db)):
+    token = _session_token(request, payload)
+    if token:
+        session_service.revoke(db, token)
+    _clear_session_cookie(response, request)
     return {"message": "Signed out"}
 
 
@@ -272,6 +364,7 @@ def get_my_profile(current_user: User = Depends(get_current_user)):
 @router.patch("/change-password")
 def change_password(
     request: Request,
+    response: Response,
     password_data: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -301,8 +394,8 @@ def change_password(
     audit_service.record("auth.password_change", actor=current_user, request=request)
 
     user_agent, ip = _client(request)
-    return {"message": "Password changed successfully",
-            **session_service.issue_tokens(db, current_user, user_agent, ip)}
+    tokens = session_service.issue_tokens(db, current_user, user_agent, ip)
+    return {"message": "Password changed successfully", **_with_session_cookie(response, request, tokens)}
 
 
 # ------------------------------------------------------------------

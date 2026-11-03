@@ -53,6 +53,9 @@ services:
       ALLOW_SELF_REGISTRATION: "${ALLOW_SELF_REGISTRATION:-false}"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}"
       ENABLE_API_DOCS: "${ENABLE_API_DOCS:-false}"
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-30m}"
+      LOGIN_LOCK_THRESHOLD: "${LOGIN_LOCK_THRESHOLD:-5}"
+      LOGIN_LOCK_MINUTES: "${LOGIN_LOCK_MINUTES:-15}"
       LLM_MAX_CONCURRENCY: "1"
       INGESTION_CONCURRENCY: "1"
       # Requests arrive through the web container; trust its X-Forwarded-For
@@ -84,10 +87,10 @@ services:
       - "${RAGENTIS_WATCH_DIR:-./watch}:/app/watch:ro"
       # Keeps the downloaded embedding model, so it is fetched only once.
       - hf_cache:/hf_cache
-    # Use 0.0.0.0:8000:8000 only when other office computers must connect,
-    # and then put HTTPS (reverse proxy) in front of it.
-    ports:
-      - "127.0.0.1:8000:8000"
+    # No host port: the API is reached only through the HTTPS web server
+    # (https://localhost:8443/api). This keeps every request on HTTPS and stops
+    # local programs from bypassing it. For debugging only you can add
+    #   ports: ["127.0.0.1:8000:8000"]
 
   # Web server: the app at https://localhost:8443 and the API under /api.
   web:

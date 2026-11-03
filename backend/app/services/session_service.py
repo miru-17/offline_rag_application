@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.core.config import REFRESH_TOKEN_DAYS
+from app.core.config import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_REUSE_GRACE_SECONDS, REFRESH_TOKEN_DAYS
 from app.core.security import create_access_token, hash_refresh_token, new_refresh_token
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
@@ -44,7 +44,7 @@ def issue_tokens(db: Session, user: User, user_agent: str | None = None, ip: str
         "access_token": _access_token(user),
         "refresh_token": token,
         "token_type": "bearer",
-        "expires_in": 30 * 60,
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
 
 
@@ -55,9 +55,21 @@ def rotate(db: Session, refresh_token: str, user_agent: str | None = None, ip: s
 
     now = datetime.utcnow()
     if record.revoked_at is not None:
-        # Re-use of a rotated token: assume theft, end every session in the family.
-        revoke_family(db, record.family_id)
-        raise SessionError("Session was already used")
+        concurrent = (
+            record.rotated_at is not None
+            and (now - record.rotated_at).total_seconds() <= REFRESH_REUSE_GRACE_SECONDS
+            and record.expires_at > now
+        )
+        if not concurrent:
+            # Re-use of an old token: assume theft, end every session in the family.
+            revoke_family(db, record.family_id)
+            raise SessionError("Session was already used")
+        # Another tab refreshed a moment ago: continue the same session.
+        user = db.get(User, record.user_id)
+        if user is None or not user.is_active:
+            revoke_family(db, record.family_id)
+            raise SessionError("Account unavailable")
+        return user, issue_tokens(db, user, user_agent, ip, family_id=record.family_id)
     if record.expires_at <= now:
         raise SessionError("Session expired")
 
@@ -67,6 +79,7 @@ def rotate(db: Session, refresh_token: str, user_agent: str | None = None, ip: s
         raise SessionError("Account unavailable")
 
     record.revoked_at = now
+    record.rotated_at = now
     db.flush()
     return user, issue_tokens(db, user, user_agent, ip, family_id=record.family_id)
 

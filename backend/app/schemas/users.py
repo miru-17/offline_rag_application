@@ -49,6 +49,7 @@ class ManagedUserResponse(BaseModel):
     mfa_enabled: bool = False
     auth_source: str = "local"
     must_change_password: bool = False
+    locked: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

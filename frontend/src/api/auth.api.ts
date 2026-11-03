@@ -87,8 +87,9 @@ export const getSetupStatus = async (): Promise<SetupStatus> => {
 export const verifyMfa = async (mfaToken: string, code: string): Promise<LoginResponse> =>
   (await apiClient.post<LoginResponse>("/auth/mfa/verify", { mfa_token: mfaToken, code })).data;
 
-export const logoutSession = async (refreshToken: string): Promise<void> => {
-  await apiClient.post("/auth/logout", { refresh_token: refreshToken });
+/** Ends the session on the server and removes the session cookie. */
+export const logoutSession = async (): Promise<void> => {
+  await apiClient.post("/auth/logout", {});
 };
 
 export const startMfaSetup = async (): Promise<{ secret: string; otpauth_uri: string }> =>

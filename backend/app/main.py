@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     retention_service.stop()
 
 
-docs_enabled = os.getenv("ENABLE_API_DOCS", "true").lower() == "true"
+docs_enabled = os.getenv("ENABLE_API_DOCS", "false").lower() == "true"
 
 app = FastAPI(
     title="RAGENTIS",

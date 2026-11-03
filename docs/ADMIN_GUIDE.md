@@ -101,6 +101,14 @@ Allow TCP 8443 in Windows Defender Firewall for the private network only.
   *Turn off two-step login*.
 * **Sessions:** a sign-in stays valid for 14 days of use (`REFRESH_TOKEN_DAYS`).
   Changing a password, resetting it or deactivating an account ends all sessions.
+  The session is kept in an HttpOnly cookie that scripts in the page cannot read;
+  nothing secret is stored in the browser's local storage.
+* **Account lockout:** after 5 wrong passwords or two-step codes in a row a local
+  account is locked for 15 minutes (`LOGIN_LOCK_THRESHOLD`, `LOGIN_LOCK_MINUTES`).
+  Users → ⋮ → *Unlock account* ends it early; a password reset also unlocks.
+  Active Directory accounts follow the directory's own lockout policy.
+* **Two-step codes** work only once, so a code seen over someone's shoulder
+  cannot be reused.
 
 ### 4.1 Active Directory / LDAP
 
@@ -218,8 +226,21 @@ sh scripts/backup.sh          (Linux / WSL)
 ```
 
 Creates `backups/<date-time>/` with the database, uploaded files, search index,
-reports and a checksum file. Copy it to an encrypted external drive. Keep `.env`
-separately. Suggested: daily with Windows Task Scheduler, keep 14 days.
+reports and a checksum file. Keep `.env` separately. Suggested: daily with
+Windows Task Scheduler, keep 14 days.
+
+**Encrypt the backup (recommended):** set a passphrase of at least 12 characters
+before running the script. The files are then written as `*.enc`
+(AES-256-GCM) and are useless without the passphrase:
+
+```
+set RAGENTIS_BACKUP_PASSPHRASE=a long passphrase only IT knows      (Windows)
+export RAGENTIS_BACKUP_PASSPHRASE='a long passphrase only IT knows'  (Linux)
+```
+
+Store the passphrase in the company password vault: a lost passphrase means the
+backup cannot be restored. Restore needs the same variable set; a wrong
+passphrase stops the restore before anything is changed.
 
 **Restore** (replaces ALL current data – make a fresh backup first):
 
@@ -233,6 +254,14 @@ package, copy `.env` and the backup folder, run restore, sign in and ask a
 question.
 
 > Never run `docker compose down -v`. The `-v` deletes all data volumes.
+
+### Developer front end
+
+`npm run dev` (in `frontend`) serves the app on http://localhost:5173 and forwards
+`/api` to the running Docker web server (https://localhost:8443). For a backend
+started directly with uvicorn use `set RAGENTIS_DEV_BACKEND=http://127.0.0.1:8000`
+first. Do not set `VITE_API_BASE_URL` to another address: the session cookie only
+works when the app and `/api` share one address.
 
 ---
 
@@ -257,4 +286,5 @@ question.
 | Licence expired | install the renewed `.license` file on the Licence page; documents are kept |
 | Everyone signed out after update | `JWT_SECRET_KEY` changed – expected once |
 
-Health at a glance: **Insights → System health**.
+Health at a glance: **Insights → System health**, or `curl.exe -k https://localhost:8443/api/health`.
+The API itself has no port of its own any more: everything goes through HTTPS on 8443.

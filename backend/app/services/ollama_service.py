@@ -21,6 +21,7 @@ from app.core.config import (
     LLM_QUEUE_WAIT_SECONDS,
     OLLAMA_ALLOWED_MODELS,
     OLLAMA_BASE_URL,
+    OLLAMA_KEEP_ALIVE,
     OLLAMA_MODEL,
     OLLAMA_NUM_CTX,
     OLLAMA_TIMEOUT_SECONDS,
@@ -105,7 +106,8 @@ def _payload(prompt: str, stream: bool, json_mode: bool, temperature: float, max
     options = {"temperature": temperature, "num_ctx": OLLAMA_NUM_CTX}
     if max_tokens:
         options["num_predict"] = max_tokens
-    payload = {"model": model or active_model(), "prompt": prompt, "stream": stream, "options": options}
+    payload = {"model": model or active_model(), "prompt": prompt, "stream": stream, "options": options,
+               "keep_alive": OLLAMA_KEEP_ALIVE}
     if json_mode:
         payload["format"] = "json"
     return payload

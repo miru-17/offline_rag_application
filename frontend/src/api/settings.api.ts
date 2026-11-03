@@ -22,7 +22,7 @@ export const changePassword = async (
 
   // Old sessions are revoked on the server; keep this one signed in.
   if (response.data.access_token) {
-    storeTokens({ access_token: response.data.access_token, refresh_token: response.data.refresh_token });
+    storeTokens({ access_token: response.data.access_token });
   }
 
   return response.data;

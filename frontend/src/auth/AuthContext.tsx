@@ -15,7 +15,7 @@ import {
   type CurrentUser,
   type LoginResponse,
 } from "../api/auth.api";
-import { clearTokens, getAccessToken, getRefreshToken, storeTokens } from "../api/tokens";
+import { clearTokens, refreshSession, storeTokens } from "../api/tokens";
 
 /** Returned by login() when the account has two-step login switched on. */
 export interface MfaChallenge {
@@ -44,17 +44,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
 
   const logout = useCallback(() => {
-    const refreshToken = getRefreshToken();
-    if (refreshToken) {
-      // End the session on the server too; ignore network errors.
-      void logoutSession(refreshToken).catch(() => undefined);
-    }
+    // End the session on the server (also removes the cookie); ignore network errors.
+    void logoutSession().catch(() => undefined);
     clearTokens();
     setUser(null);
   }, []);
 
   const loadCurrentUser = useCallback(async () => {
-    if (!getAccessToken() && !getRefreshToken()) {
+    // A page load starts without an access token: ask for one with the session cookie.
+    if (!(await refreshSession())) {
       setUser(null);
       setIsLoading(false);
       return;
@@ -76,7 +74,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const finish = async (response: LoginResponse) => {
     if (!response.access_token) throw new Error("Sign-in did not return a session.");
-    storeTokens({ access_token: response.access_token, refresh_token: response.refresh_token });
+    storeTokens({ access_token: response.access_token });
     try {
       setUser(await getCurrentUser());
     } catch {

@@ -14,6 +14,11 @@ if not DATABASE_URL:
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
+    # Enough connections for the web requests plus the background workers
+    # (ingestion, watched folder, reports, retention) without waiting.
+    pool_size=int(os.getenv("DB_POOL_SIZE", "10")),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "20")),
+    pool_recycle=1800,
 )
 
 SessionLocal = sessionmaker(

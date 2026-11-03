@@ -2,7 +2,7 @@ import uuid
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.connection import Base
@@ -95,6 +95,12 @@ class User(Base):
     )
     mfa_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mfa_pending_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Last accepted 30-second step: a code cannot be used twice.
+    mfa_last_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # Account lockout after repeated wrong passwords / codes.
+    failed_login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     group_memberships = relationship(
         "GroupMember",

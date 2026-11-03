@@ -37,7 +37,8 @@ class TokenResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str = Field(min_length=20, max_length=200)
+    # Normally empty: the refresh token travels in the HttpOnly session cookie.
+    refresh_token: str | None = Field(None, min_length=20, max_length=200)
 
 
 class MfaVerifyRequest(BaseModel):

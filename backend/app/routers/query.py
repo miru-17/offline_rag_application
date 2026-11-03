@@ -23,6 +23,7 @@ from app.models.message import Message
 from app.models.user import User
 from app.core.config import HYBRID_SEARCH
 from app.services.ollama_service import LLMError, model_for_tenant
+from app.services.access import searchable_documents
 from app.services.prompt_builder import NOT_FOUND_ANSWER
 from app.services.rag_service import RAGService, looks_like_not_found
 
@@ -117,6 +118,7 @@ async def query_documents(
             HYBRID_SEARCH and tenant.hybrid_search,
             tenant.answer_language,
             model_for_tenant(tenant),
+            searchable_documents(db, current_user, group_ids),
         )
     except LLMError as exc:
         db.rollback()
@@ -201,6 +203,7 @@ def query_stream(
     language = current_user.tenant.answer_language
     model = model_for_tenant(current_user.tenant)
     group_ids = get_user_group_ids(db, current_user)
+    accessible = searchable_documents(db, current_user, group_ids)
 
     def save(answer: str, status: str, sources: list) -> str:
         session = SessionLocal()
@@ -223,7 +226,7 @@ def query_stream(
 
         try:
             prepared = await run_in_threadpool(rag_service.prepare, query, user_id, tenant_id, top_k, group_ids, history,
-                                               None, hybrid, language, model)
+                                               None, hybrid, language, model, accessible)
         except Exception:
             logger.exception("Retrieval failed")
             await run_in_threadpool(save, "Retrieval failed.", "error", [])

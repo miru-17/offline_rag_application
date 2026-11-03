@@ -7,6 +7,7 @@ stand-ins (`sitecustomize.py` for the embedding model/tokenizer,
 ```bash
 ./reset.sh                 # fresh database, copy of backend, fake models, start API
 python api_test.py         # 143 API checks
+LOGIN_RATE_LIMIT=1000/minute ./reset.sh && python security_test.py   # 32 security checks
 node ui_test.js            # 19 browser checks (needs `npm run dev` on :5173 and Playwright)
 ```
 

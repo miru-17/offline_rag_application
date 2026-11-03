@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,6 +10,8 @@ from app.database.connection import Base
 
 class Document(Base):
     __tablename__ = "documents"
+    # Lists, search scoping and retention all filter by organisation + status.
+    __table_args__ = (Index("ix_documents_tenant_status", "tenant_id", "status"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

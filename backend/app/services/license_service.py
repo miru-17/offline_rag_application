@@ -175,8 +175,14 @@ def verify_license_text(license_text: str) -> dict:
     return payload
 
 
+_installation_id: str | None = None
+
+
 def get_installation_id(db: Session) -> str:
-    """This installation's ID, created on first use."""
+    """This installation's ID, created on first use (it never changes, so it is cached)."""
+    global _installation_id
+    if _installation_id is not None:
+        return _installation_id
     row = db.get(Installation, 1)
     if row is None:
         parts = [secrets.token_hex(2).upper() for _ in range(4)]
@@ -187,7 +193,8 @@ def get_installation_id(db: Session) -> str:
         except Exception:      # another request created it at the same moment
             db.rollback()
             row = db.get(Installation, 1)
-    return row.installation_id
+    _installation_id = row.installation_id
+    return _installation_id
 
 
 @dataclass

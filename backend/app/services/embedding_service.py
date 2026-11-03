@@ -35,6 +35,14 @@ def _load_model() -> SentenceTransformer:
     return model
 
 
+@lru_cache(maxsize=512)
+def _cached_query_embedding(text: str) -> tuple[float, ...]:
+    model = _load_model()
+    with _encode_lock:
+        embedding = model.encode(text, normalize_embeddings=True)
+    return tuple(embedding.tolist())
+
+
 class EmbeddingService:
     """Thin wrapper; every instance shares the same loaded model."""
 
@@ -44,11 +52,8 @@ class EmbeddingService:
     def generate_embedding(self, text: str) -> list[float]:
         if not text or not text.strip():
             raise ValueError("Cannot generate embedding for empty text.")
-
-        with _encode_lock:
-            embedding = self.model.encode(text, normalize_embeddings=True)
-
-        return embedding.tolist()
+        # Repeated questions (and follow-ups) reuse the vector instead of running the model again.
+        return list(_cached_query_embedding(text))
 
     def generate_embeddings(self, texts: list[str], batch_size: int = 32) -> list[list[float]]:
         if not texts:

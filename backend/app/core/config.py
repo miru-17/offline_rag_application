@@ -105,6 +105,9 @@ OLLAMA_BASE_URL = os.getenv(
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 OLLAMA_TIMEOUT_SECONDS = _int("OLLAMA_TIMEOUT_SECONDS", 180)
 OLLAMA_NUM_CTX = _int("OLLAMA_NUM_CTX", 4096)
+# Keep the model loaded in memory between questions (Ollama unloads it after
+# 5 minutes by default, and loading it again takes many seconds on a laptop).
+OLLAMA_KEEP_ALIVE = _env("OLLAMA_KEEP_ALIVE", "30m")
 
 # Only this many LLM generations run at the same time (CPU laptop).
 LLM_MAX_CONCURRENCY = _int("LLM_MAX_CONCURRENCY", 1)
@@ -186,3 +189,21 @@ OLLAMA_ALLOWED_MODELS = [m.strip() for m in os.getenv("OLLAMA_ALLOWED_MODELS", "
 
 # Retention clean-up runs this often (hours).
 RETENTION_INTERVAL_HOURS = _int("RETENTION_INTERVAL_HOURS", 24)
+
+
+# ------------------------------------------------------------
+# Sign-in protection
+# ------------------------------------------------------------
+# Lock a local account for LOGIN_LOCK_MINUTES after LOGIN_LOCK_THRESHOLD
+# wrong passwords or two-step codes in a row (Active Directory accounts
+# follow the directory's own lockout policy).
+LOGIN_LOCK_THRESHOLD = _int("LOGIN_LOCK_THRESHOLD", 5)
+LOGIN_LOCK_MINUTES = _int("LOGIN_LOCK_MINUTES", 15)
+
+# The refresh token lives in an HttpOnly cookie that JavaScript cannot read.
+# "auto" marks it Secure when the request arrived over HTTPS.
+REFRESH_COOKIE_NAME = "ragentis_session"
+REFRESH_COOKIE_SECURE = _env("REFRESH_COOKIE_SECURE", "auto").lower()
+# Two browser tabs may refresh at the same moment; a just-rotated token is
+# accepted again for this many seconds instead of being treated as stolen.
+REFRESH_REUSE_GRACE_SECONDS = _int("REFRESH_REUSE_GRACE_SECONDS", 30)
