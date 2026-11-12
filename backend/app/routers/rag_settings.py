@@ -20,6 +20,7 @@ RETENTION_FIELDS = ("conversation_retention_days", "audit_retention_days", "docu
 
 def _settings(tenant) -> dict:
     return {
+        "organisation_name": tenant.label,
         "retrieval_depth": tenant.retrieval_depth,
         "source_attribution": tenant.source_attribution,
         "pii_mode": tenant.pii_mode,
@@ -52,6 +53,9 @@ def update_rag_settings(
         if settings.llm_model not in ollama_service.allowed_models():
             raise HTTPException(status_code=400, detail="This model is not offered on this server.")
         tenant.llm_model = None if settings.llm_model == ollama_service.MODEL_NAME else settings.llm_model
+
+    if "organisation_name" in sent and settings.organisation_name:
+        tenant.display_name = settings.organisation_name.strip()
 
     for name in ("retrieval_depth", "source_attribution", "pii_mode", "hybrid_search", "answer_language"):
         value = getattr(settings, name)

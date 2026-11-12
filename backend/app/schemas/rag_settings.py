@@ -8,6 +8,7 @@ LanguageCode = Literal.__getitem__(("auto", *LANGUAGES.keys()))  # type: ignore[
 
 
 class RAGSettingsResponse(BaseModel):
+    organisation_name: str = ""
     retrieval_depth: int
     source_attribution: bool
     pii_mode: str = "flag"
@@ -22,6 +23,7 @@ class RAGSettingsResponse(BaseModel):
 class RAGSettingsUpdate(BaseModel):
     """Fields left out are not changed. A retention value of null means keep forever."""
 
+    organisation_name: str | None = Field(None, min_length=2, max_length=150)
     retrieval_depth: int | None = Field(None, ge=3, le=10)
     source_attribution: bool | None = None
     pii_mode: Literal["off", "flag", "redact"] | None = None

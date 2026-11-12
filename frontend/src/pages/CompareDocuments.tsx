@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   Alert,
   Autocomplete,
@@ -34,11 +35,20 @@ export default function CompareDocuments() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const location = useLocation();
+
   useEffect(() => {
-    getDocuments()
-      .then((docs) => setDocuments(docs.filter((d) => d.status === "ready")))
+    // Older versions are included so a new contract can be compared with the one it replaced.
+    getDocuments(true)
+      .then((docs) => {
+        const usable = docs.filter((d) => d.status === "ready" || d.status === "superseded");
+        setDocuments(usable);
+        const wanted = (location.state ?? {}) as { a?: string; b?: string };
+        if (wanted.a) setDocA(usable.find((d) => d.id === wanted.a) ?? null);
+        if (wanted.b) setDocB(usable.find((d) => d.id === wanted.b) ?? null);
+      })
       .catch((err) => setError(errorMessage(err, "Unable to load documents.")));
-  }, []);
+  }, [location.state]);
 
   const run = async () => {
     if (!docA || !docB) return;
@@ -60,7 +70,9 @@ export default function CompareDocuments() {
       options={documents}
       value={value}
       onChange={(_, v) => onChange(v)}
-      getOptionLabel={(d) => d.filename}
+      getOptionLabel={(d) =>
+        d.status === "superseded" ? `${d.filename} (version ${d.version ?? 1}, replaced)` : d.filename
+      }
       isOptionEqualToValue={(a, b) => a.id === b.id}
       renderInput={(params) => <TextField {...params} label={label} />}
     />

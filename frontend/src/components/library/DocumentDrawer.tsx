@@ -15,6 +15,7 @@ import {
 import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
 import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
 import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
+import DifferenceOutlinedIcon from "@mui/icons-material/DifferenceOutlined";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import ContentCopyOutlinedIcon from "@mui/icons-material/ContentCopyOutlined";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
@@ -220,6 +221,20 @@ export default function DocumentDrawer({
                         {v.filename} · {formatDateTime(v.created_at)}
                         {v.status === "superseded" ? " · replaced" : ""}
                       </Typography>
+                      {v.status === "superseded" && details && (
+                        <Tooltip title="Compare with the current version">
+                          <IconButton
+                            size="small"
+                            aria-label={`Compare version ${v.version} with the current version`}
+                            onClick={() => {
+                              onClose();
+                              navigate("/compare", { state: { a: v.id, b: details.id } });
+                            }}
+                          >
+                            <DifferenceOutlinedIcon sx={{ fontSize: 14 }} />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                       <Tooltip title="Open this version">
                         <IconButton
                           size="small"

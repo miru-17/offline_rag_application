@@ -77,7 +77,7 @@ def install_license(
 @router.get("/activation-request")
 def get_activation_request(current_user: User = Depends(require_roles("ADMIN")), db: Session = Depends(get_db)):
     """Code to send to the vendor to receive a licence bound to this installation."""
-    return activation_request(db, current_user.tenant.name if current_user.tenant else "")
+    return activation_request(db, current_user.tenant.label if current_user.tenant else "")
 
 
 @router.get("/history")
