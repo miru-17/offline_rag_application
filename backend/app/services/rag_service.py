@@ -7,6 +7,7 @@ question -> (follow-up context) -> retrieval with access filters
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from app.services.ollama_service import active_model
@@ -34,6 +35,37 @@ def looks_like_not_found(answer: str) -> bool:
         or "could not find the answer" in text
         or "not in your uploaded documents" in text
     )
+
+
+_CITATION = re.compile(r"\[(\d{1,2})\]")
+
+
+def cited_sources(answer: str, sources: list[dict]) -> list[dict]:
+    """Keep only the passages the answer actually used.
+
+    The model cites passages as [1], [2] (prompt rule 5). Cited passages are kept
+    with their original numbers, so "[2]" in the text still matches chip 2. When
+    the answer cites nothing, the passage naming a file the answer mentions is
+    kept, otherwise the best-ranked passage. Other retrieved passages are dropped.
+    """
+    if not sources:
+        return []
+    by_ref = {s.get("ref"): s for s in sources}
+    cited = [int(n) for n in _CITATION.findall(answer or "")]
+    picked = []
+    for ref in cited:
+        source = by_ref.get(ref)
+        if source is not None and source not in picked:
+            picked.append(source)
+    if picked:
+        return sorted(picked, key=lambda s: s.get("ref") or 0)
+    text = (answer or "").lower()
+    for source in sources:
+        name = str(source.get("filename") or "").lower()
+        stem = name.rsplit(".", 1)[0]
+        if name and (name in text or stem in text or stem.replace("_", " ") in text):
+            return [source]
+    return [sources[0]]
 
 
 class RAGService:
@@ -128,7 +160,8 @@ class RAGService:
 
         answer = llm_generate(prepared.prompt, model=prepared.model)
         status = "not_found" if looks_like_not_found(answer) else "answered"
-        return {"answer": answer, "sources": prepared.sources if status == "answered" else [], "status": status}
+        sources = cited_sources(answer, prepared.sources) if status == "answered" else []
+        return {"answer": answer, "sources": sources, "status": status}
 
     def stream(self, prepared: PreparedQuery, stop=None):
         return stream_answer(prepared.prompt, stop=stop, model=prepared.model)
