@@ -25,7 +25,7 @@ from app.core.config import HYBRID_SEARCH
 from app.services.ollama_service import LLMError, model_for_tenant
 from app.services.access import searchable_documents
 from app.services.prompt_builder import NOT_FOUND_ANSWER
-from app.services.rag_service import RAGService, looks_like_not_found
+from app.services.rag_service import RAGService, cited_sources, looks_like_not_found
 
 router = APIRouter(prefix="/query", tags=["RAG Query"])
 logger = get_logger("query")
@@ -279,7 +279,7 @@ def query_stream(
 
         answer = "".join(parts).strip()
         status = "not_found" if looks_like_not_found(answer) else "answered"
-        sources = prepared.sources if (show_sources and status == "answered") else []
+        sources = cited_sources(answer, prepared.sources) if (show_sources and status == "answered") else []
         message_id = await run_in_threadpool(save, answer, status, sources)
         yield _sse("sources", {"sources": sources})
         yield _sse("done", {"message_id": message_id, "status": status})

@@ -16,7 +16,7 @@ function SourcePreview({ source, index }: { source: QuerySource; index: number }
   const page = getSourcePage(source);
   return (
     <Box sx={{ p: 0.5, maxWidth: 280 }}>
-      <Typography sx={{ fontSize: "0.72rem", opacity: 0.7, mb: 0.25 }}>Source {index + 1}</Typography>
+      <Typography sx={{ fontSize: "0.72rem", opacity: 0.7, mb: 0.25 }}>Source {source.ref ?? index + 1}</Typography>
       <Typography sx={{ fontSize: "0.8125rem", fontWeight: 560, wordBreak: "break-word" }}>
         {getSourceFilename(source)}
       </Typography>
@@ -74,7 +74,7 @@ export function SourceChips({ sources, onOpen }: { sources: QuerySource[]; onOpe
                   bgcolor: theme.palette.rag.retrieve,
                 })}
               >
-                {i + 1}
+                {source.ref ?? i + 1}
               </Box>
               <Typography noWrap component="span" sx={{ fontSize: "0.75rem", fontWeight: 500 }}>
                 {getSourceFilename(source)}
@@ -164,7 +164,7 @@ export function EvidenceDrawer({
                   <FileTypeIcon filename={getSourceFilename(source)} size={34} />
                   <Box sx={{ flex: 1, minWidth: 0 }}>
                     <Typography sx={{ fontSize: "0.72rem", color: "info.main", fontWeight: 560 }}>
-                      Source {i + 1}
+                      Source {source.ref ?? i + 1}
                     </Typography>
                     <Typography sx={{ fontSize: "0.8438rem", fontWeight: 560, wordBreak: "break-word" }}>
                       {getSourceFilename(source)}
