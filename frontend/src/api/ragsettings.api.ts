@@ -3,6 +3,8 @@ import apiClient from "./axios";
 export type PiiMode = "off" | "flag" | "redact";
 
 export interface RAGSettings {
+  /** Name shown in the app and in reports. */
+  organisation_name?: string;
   retrieval_depth: number;
   source_attribution: boolean;
   pii_mode?: PiiMode;

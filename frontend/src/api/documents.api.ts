@@ -40,8 +40,10 @@ export interface DocumentListResponse {
   total?: number;
 }
 
-export const getDocuments = async (): Promise<DocumentItem[]> => {
-  const response = await apiClient.get<DocumentItem[]>("/documents/");
+export const getDocuments = async (includeHistory = false): Promise<DocumentItem[]> => {
+  const response = await apiClient.get<DocumentItem[]>("/documents/", {
+    params: includeHistory ? { include_history: true } : undefined,
+  });
   return response.data;
 };
 

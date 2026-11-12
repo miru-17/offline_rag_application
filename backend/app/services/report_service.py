@@ -168,7 +168,7 @@ def generate(db, tenant: Tenant, days: int = 7, kind: str = "manual", created_by
     start = end - timedelta(days=days)
     data = collect(db, tenant.id, start, end)
     path = Path(REPORTS_DIR) / str(tenant.id) / f"{end:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}.pdf"
-    render_pdf(tenant.name, start, end, data, path)
+    render_pdf(tenant.label, start, end, data, path)
     report = Report(tenant_id=tenant.id, created_by=created_by, kind=kind, period_start=start, period_end=end,
                     file_path=str(path), file_size=path.stat().st_size)
     db.add(report)

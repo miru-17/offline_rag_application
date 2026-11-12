@@ -117,7 +117,7 @@ def register(request: Request, user_data: RegisterRequest, db: Session = Depends
             "email": new_user.email,
             "role": role.name,
             "tenant_id": str(new_user.tenant_id),
-            "tenant_name": tenant.name,
+            "tenant_name": tenant.label,
         },
     }
 
@@ -354,7 +354,7 @@ def get_my_profile(current_user: User = Depends(get_current_user)):
         "email": current_user.email,
         "role": current_user.role.name,
         "tenant_id": str(current_user.tenant_id),
-        "tenant_name": current_user.tenant.name,
+        "tenant_name": current_user.tenant.label,
         "auth_source": current_user.auth_source,
         "mfa_enabled": current_user.mfa_enabled,
         "must_change_password": current_user.must_change_password,

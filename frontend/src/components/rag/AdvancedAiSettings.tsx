@@ -29,6 +29,7 @@ import {
   type RAGSettings,
   type SettingsOptions,
 } from "../../api/ragsettings.api";
+import { useAuth } from "../../auth/AuthContext";
 import { getApiErrorMessage } from "../../utils/format";
 import { toast } from "../common/Toast";
 
@@ -72,10 +73,13 @@ export default function AdvancedAiSettings({ isAdmin }: { isAdmin: boolean }) {
     document_retention_days: "",
   });
   const [confirmRun, setConfirmRun] = useState(false);
+  const [orgName, setOrgName] = useState("");
+  const { refreshUser } = useAuth();
   const [busy, setBusy] = useState<"run" | "reindex" | null>(null);
 
   const applySettings = (s: RAGSettings) => {
     setSettings(s);
+    setOrgName(s.organisation_name ?? "");
     setRetention({
       conversation_retention_days: s.conversation_retention_days ? String(s.conversation_retention_days) : "",
       audit_retention_days: s.audit_retention_days ? String(s.audit_retention_days) : "",
@@ -151,6 +155,32 @@ export default function AdvancedAiSettings({ isAdmin }: { isAdmin: boolean }) {
 
         {settings && options && (
           <Stack spacing={3}>
+            <Row title="Organisation name" help="Shown in the top bar, on the licence page and in reports.">
+              <Box sx={{ display: "flex", gap: 1 }}>
+                <TextField
+                  size="small"
+                  value={orgName}
+                  disabled={!isAdmin || saving}
+                  onChange={(e) => setOrgName(e.target.value)}
+                  slotProps={{ htmlInput: { maxLength: 150, "aria-label": "Organisation name" } }}
+                  sx={{ minWidth: 260 }}
+                />
+                {isAdmin && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={saving || orgName.trim().length < 2 || orgName.trim() === (settings.organisation_name ?? "")}
+                    onClick={async () => {
+                      await save({ organisation_name: orgName.trim() }, "Organisation name saved.");
+                      void refreshUser().catch(() => undefined);
+                    }}
+                  >
+                    Save
+                  </Button>
+                )}
+              </Box>
+            </Row>
+
             <Row
               title="Exact-match (hybrid) search"
               help="Also finds invoice numbers, IDs and quoted phrases word for word, not only by meaning."

@@ -286,7 +286,9 @@ def _ready_content_document(db: Session, user: User, document_id: UUID) -> Docum
     document = get_content_document(db, user, document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found.")
-    if document.status != "ready":
+    # Older versions ("superseded") keep their file, so they can still be
+    # summarised, compared with the new version or have their tables read.
+    if document.status not in ("ready", "superseded"):
         raise HTTPException(status_code=409, detail="The document is not ready yet.")
     return document
 
