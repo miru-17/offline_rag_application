@@ -56,7 +56,12 @@ def focus_on_best(documents, metadatas, distances, matches, margin=None):
     return pick(documents), pick(metadatas), pick(distances), pick(matches)
 
 
-_CITATION = re.compile(r"\[(\d{1,2})\]")
+_CITATION = re.compile(
+    r"\[(?:document\s*|source\s*)?(\d{1,2})\]"            # [1], [Document 1], [source 1]
+    r"|\bid\s*=\s*[\"']?(\d{1,2})[\"']?"                 # id="3" (copied from the prompt tags)
+    r"|\b(?:document|source)\s+(?:no\.?\s*)?(\d{1,2})\b",  # document 3, source 2
+    re.IGNORECASE,
+)
 
 
 def cited_sources(answer: str, sources: list[dict]) -> list[dict]:
@@ -70,7 +75,7 @@ def cited_sources(answer: str, sources: list[dict]) -> list[dict]:
     if not sources:
         return []
     by_ref = {s.get("ref"): s for s in sources}
-    cited = [int(n) for n in _CITATION.findall(answer or "")]
+    cited = [int(next(g for g in groups if g)) for groups in _CITATION.findall(answer or "")]
     picked = []
     for ref in cited:
         source = by_ref.get(ref)
