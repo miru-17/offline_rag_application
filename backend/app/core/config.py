@@ -108,6 +108,11 @@ OLLAMA_NUM_CTX = _int("OLLAMA_NUM_CTX", 4096)
 # Keep the model loaded in memory between questions (Ollama unloads it after
 # 5 minutes by default, and loading it again takes many seconds on a laptop).
 OLLAMA_KEEP_ALIVE = _env("OLLAMA_KEEP_ALIVE", "30m")
+# Upper limit for one answer (tokens). Stops a small model from rambling on a CPU.
+OLLAMA_MAX_ANSWER_TOKENS = _int("OLLAMA_MAX_ANSWER_TOKENS", 600)
+# Passages much weaker than the best match are left out of the prompt: a shorter
+# prompt is answered faster, and unrelated text cannot confuse the model.
+RELEVANCE_MARGIN = float(os.getenv("RELEVANCE_MARGIN", "0.15"))
 
 # Only this many LLM generations run at the same time (CPU laptop).
 LLM_MAX_CONCURRENCY = _int("LLM_MAX_CONCURRENCY", 1)

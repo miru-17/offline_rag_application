@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from app.core.config import RELEVANCE_MARGIN
+
 from app.services.ollama_service import active_model
 from app.services.ollama_service import generate_answer as llm_generate
 from app.services.ollama_service import stream_answer
@@ -35,6 +37,23 @@ def looks_like_not_found(answer: str) -> bool:
         or "could not find the answer" in text
         or "not in your uploaded documents" in text
     )
+
+
+def focus_on_best(documents, metadatas, distances, matches, margin=None):
+    """Keep the passages close to the best match.
+
+    A passage whose distance is more than ``margin`` worse than the best one is
+    dropped, unless it matched the exact words of the question (hybrid search).
+    The order is kept, and the best passage always stays.
+    """
+    margin = RELEVANCE_MARGIN if margin is None else margin
+    if not distances:
+        return documents, metadatas, distances, matches
+    best = min(float(d) for d in distances)
+    keep = [i for i, d in enumerate(distances)
+            if float(d) <= best + margin or "keyword" in str(matches[i] if i < len(matches) else "")]
+    pick = lambda values: [values[i] for i in keep if i < len(values)]
+    return pick(documents), pick(metadatas), pick(distances), pick(matches)
 
 
 _CITATION = re.compile(r"\[(\d{1,2})\]")
@@ -116,6 +135,7 @@ class RAGService:
         metadatas = results.get("metadatas", [[]])[0]
         distances = results.get("distances", [[]])[0]
         matches = (results.get("matches") or [[]])[0]
+        documents, metadatas, distances, matches = focus_on_best(documents, metadatas, distances, matches)
 
         excerpts, sources = [], []
         for index, text in enumerate(documents):
